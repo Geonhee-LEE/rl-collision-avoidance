@@ -11,6 +11,21 @@ This is a Pytorch implementation of the paper [Towards Optimally Decentralized M
 - [Stage](http://rtv.github.io/Stage/)
 - [PyTorch](http://pytorch.org/)
 
+## How to customize
+
+### Training the serving bot with Wandering agents
+
+- Run the Stage ros
+```
+rosrun stage_ros_add_pose_and_crash stageros_w -u -n 6 $HOME/rl_ws/src/rl-collision-avoidance/worlds/env/servingbot_agent.world
+```
+
+- Train the policy
+```
+mpiexec -np 1 python ppo_stage1.py
+```
+
+
 
 ## How to train
 Please use the `stage_ros-add_pose_and_crash` package instead of the default package provided by ROS.
