@@ -2,15 +2,6 @@
 
 This is a Pytorch implementation of the paper [Towards Optimally Decentralized Multi-Robot Collision Avoidance via Deep Reinforcement Learning](https://arxiv.org/abs/1709.10082)
 
-
-## Requirement
-
-- python2.7
-- [ROS Kinetic](http://wiki.ros.org/kinetic)
-- [mpi4py](https://mpi4py.readthedocs.io/en/stable/)
-- [Stage](http://rtv.github.io/Stage/)
-- [PyTorch](http://pytorch.org/)
-
 ## How to customize
 
 ### Training the serving bot with Wandering agents
@@ -25,6 +16,18 @@ rosrun stage_ros_add_pose_and_crash stageros_w -u -n 6 $HOME/rl_ws/src/rl-collis
 mpiexec -np 1 python ppo_stage1.py
 ```
 
+
+<details>
+<summary> Requirements </summary>
+    
+
+## Requirement
+
+- python2.7
+- [ROS Kinetic](http://wiki.ros.org/kinetic)
+- [mpi4py](https://mpi4py.readthedocs.io/en/stable/)
+- [Stage](http://rtv.github.io/Stage/)
+- [PyTorch](http://pytorch.org/)
 
 
 ## How to train
@@ -68,3 +71,6 @@ If you find it useful and use it in your project, please consider citing:
 	commit = {7bc682403cb9a327377481be1f110debc16babbd}
 }
 ```
+
+    
+</details>
