@@ -17,9 +17,7 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 /**
-
 @mainpage
-
 @htmlinclude manifest.html
 **/
 
@@ -27,12 +25,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <time.h>
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <signal.h>
 
-
+#include <iostream>
+#include <ctime>
+#include <cmath>
 // libstage
 #include <stage.hh>
 
@@ -44,14 +46,17 @@
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/CameraInfo.h>
+
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/Twist.h>
-#include <std_msgs/Int8.h>
 #include <rosgraph_msgs/Clock.h>
+
+#include <std_msgs/Int8.h>
 
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/PoseStamped.h>
 #include "tf/LinearMath/Transform.h"
+
 #include <std_srvs/Empty.h>
 
 #include "tf/transform_broadcaster.h"
@@ -64,6 +69,7 @@
 #define BASE_SCAN "base_scan"
 #define BASE_POSE_GROUND_TRUTH "base_pose_ground_truth"
 #define CMD_VEL "cmd_vel"
+
 #define POSE "cmd_pose"
 #define POSESTAMPED "cmd_pose_stamped"
 #define IS_CRASHED "is_crashed"
@@ -149,6 +155,9 @@ private:
     // Last published global pose of each robot
     std::vector<Stg::Pose> base_last_globalpos;
 
+    //collision count
+    int count_collision = 0;
+
 public:
     // Constructor; stage itself needs argc/argv.  fname is the .world file
     // that stage should load.
@@ -182,6 +191,7 @@ public:
 
     // The main simulator object
     Stg::World* world;
+
 };
 
 // since stageros is single-threaded, this is OK. revisit if that changes!
@@ -260,7 +270,8 @@ StageNode::ghfunc(Stg::Model* mod, StageNode* node)
 bool
 StageNode::cb_reset_srv(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response)
 {
-  ROS_INFO("Resetting stage!");
+  boost::mutex::scoped_lock lock(msg_lock);
+
   for (size_t r = 0; r < this->positionmodels.size(); r++) {
     this->positionmodels[r]->SetPose(this->initial_poses[r]);
     this->positionmodels[r]->SetStall(false);
@@ -268,10 +279,10 @@ StageNode::cb_reset_srv(std_srvs::Empty::Request& request, std_srvs::Empty::Resp
   return true;
 }
 
-
 void
 StageNode::cmdvelReceived(int idx, const boost::shared_ptr<geometry_msgs::Twist const>& msg)
 {
+
     boost::mutex::scoped_lock lock(msg_lock);
     this->positionmodels[idx]->SetSpeed(msg->linear.x,
                                         msg->linear.y,
@@ -288,12 +299,16 @@ StageNode::poseReceived(int idx, const boost::shared_ptr<geometry_msgs::Pose con
     double roll, pitch, yaw;
     tf::Matrix3x3 m(tf::Quaternion(msg->orientation.x,msg->orientation.y,msg->orientation.z,msg->orientation.w));
     m.getRPY(roll, pitch, yaw);
+
     pose.x = msg->position.x;
     pose.y = msg->position.y;
     pose.z = 0;
     pose.a = yaw;
     this->positionmodels[idx]->SetPose(pose);
+
 }
+
+
 
 void
 StageNode::poseStampedReceived(int idx, const boost::shared_ptr<geometry_msgs::PoseStamped const>& msg)
@@ -307,6 +322,7 @@ StageNode::poseStampedReceived(int idx, const boost::shared_ptr<geometry_msgs::P
     boost::shared_ptr<geometry_msgs::Pose const> pose_ptr(pose);
     this->poseReceived(idx, pose_ptr);
 }
+
 
 StageNode::StageNode(int argc, char** argv, bool gui, const char* fname, bool use_model_names)
 {
@@ -448,10 +464,13 @@ StageNode::UpdateWorld()
     return this->world->UpdateAll();
 }
 
+
 void
 StageNode::WorldCallback()
 {
     boost::mutex::scoped_lock lock(msg_lock);
+
+    //ROS_INFO("%d",this->sim_time.sec);
 
     this->sim_time.fromSec(world->SimTimeNow() / 1e6);
     // We're not allowed to publish clock==0, because it used as a special
@@ -469,7 +488,8 @@ StageNode::WorldCallback()
         for (size_t r = 0; r < this->positionmodels.size(); r++)
             this->positionmodels[r]->SetSpeed(0.0, 0.0, 0.0);
     }
-
+       
+     
     //loop on the robot models
     for (size_t r = 0; r < this->robotmodels_.size(); ++r)
     {
@@ -801,7 +821,7 @@ main(int argc, char** argv)
         if(!strcmp(argv[i], "-g"))
             gui = false;
         if(!strcmp(argv[i], "-u"))
-            use_model_names = true;
+            use_model_names = true;            
     }
 
     StageNode sn(argc-1,argv,gui,argv[argc-1], use_model_names);
