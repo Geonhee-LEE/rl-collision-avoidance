@@ -11,6 +11,12 @@ This is a Pytorch implementation of the paper [Towards Optimally Decentralized M
 rosrun stage_ros_reinforcement_learning stageros_wander -u -n 6 $HOME/rl_ws/src/rl-collision-avoidance/worlds/servingbot_env/servingbot_agent.world
 ```
 
+- or Launch 
+```
+roslaunch stage_ros_reinforcement_learning training.launch 
+```
+
+
 - Train the policy
 ```
 mpiexec -np 1 python ppo_stage1.py
