@@ -2,6 +2,30 @@
 
 This is a Pytorch implementation of the paper [Towards Optimally Decentralized Multi-Robot Collision Avoidance via Deep Reinforcement Learning](https://arxiv.org/abs/1709.10082)
 
+## How to customize
+
+### Training the serving bot with Wandering agents
+
+- Run the Stage ros
+```
+rosrun stage_ros_reinforcement_learning stageros_wander -u -n 6 $HOME/rl_ws/src/rl-collision-avoidance/worlds/servingbot_env/servingbot_agent.world
+```
+
+- or Launch 
+```
+roslaunch stage_ros_reinforcement_learning training.launch 
+```
+
+
+- Train the policy
+```
+mpiexec -np 1 python ppo_stage1.py
+```
+
+
+<details>
+<summary> Requirements </summary>
+    
 
 ## Requirement
 
@@ -53,3 +77,6 @@ If you find it useful and use it in your project, please consider citing:
 	commit = {7bc682403cb9a327377481be1f110debc16babbd}
 }
 ```
+
+    
+</details>

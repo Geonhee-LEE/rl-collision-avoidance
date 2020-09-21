@@ -1,0 +1,3 @@
+[submodule "stage_ros_reinforcement_learning"]
+	path = stage_ros_reinforcement_learning
+	url = https://github.com/Geonhee-LEE/stage_ros_reinforcement_learning.git
