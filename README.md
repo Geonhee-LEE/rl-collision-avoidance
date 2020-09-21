@@ -2,7 +2,6 @@
 
 This is a Pytorch implementation of the paper [Towards Optimally Decentralized Multi-Robot Collision Avoidance via Deep Reinforcement Learning](https://arxiv.org/abs/1709.10082)
 
-:-------------------------:|:-------------------------:
 
 ## Requirement
 
