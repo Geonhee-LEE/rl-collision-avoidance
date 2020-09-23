@@ -2,6 +2,7 @@ import numpy as np
 import bisect
 import torch
 from torch.autograd import Variable
+import math
 
 def test_init_pose(index):
     init_pose_list = [[25.00, 0.00, np.pi], [24.80, 3.13, np.pi*26/25], [24.21, 6.22, np.pi*27/25], [23.24, 9.20, np.pi*28/25],
@@ -126,3 +127,31 @@ class RunningMeanStd(object):
         self.mean = new_mean
         self.var = new_var
         self.count = new_count
+
+
+### SAC ###
+def create_log_gaussian(mean, log_std, t):
+    quadratic = -((0.5 * (t - mean) / (log_std.exp())).pow(2))
+    l = mean.shape
+    log_z = log_std
+    z = l[-1] * math.log(2 * math.pi)
+    log_p = quadratic.sum(dim=-1) - log_z.sum(dim=-1) - 0.5 * z
+    return log_p
+
+def logsumexp(inputs, dim=None, keepdim=False):
+    if dim is None:
+        inputs = inputs.view(-1)
+        dim = 0
+    s, _ = torch.max(inputs, dim=dim, keepdim=True)
+    outputs = s + (inputs - s).exp().sum(dim=dim, keepdim=True).log()
+    if not keepdim:
+        outputs = outputs.squeeze(dim)
+    return outputs
+
+def soft_update(target, source, tau):
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(target_param.data * (1.0 - tau) + param.data * tau)
+
+def hard_update(target, source):
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(param.data)

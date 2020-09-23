@@ -32,18 +32,12 @@ class StageWorld():
         self.map_size = np.array([8., 8.], dtype=np.float32)  # 20x20m
         self.goal_size = 0.5
 
-        self.robot_value = 10.
-        self.goal_value = 0.
-        # self.reset_pose = None
-
         self.init_pose = None
-
-
 
         # for get reward and terminate
         self.stop_counter = 0
 
-        # -----------Publisher and Subscriber-------------
+        # -----------Publisher-------------
         cmd_vel_topic = 'robot_' + str(index) + '/cmd_vel'
         self.cmd_vel = rospy.Publisher(cmd_vel_topic, Twist, queue_size=10)
 
@@ -55,7 +49,6 @@ class StageWorld():
 
 
         # ---------Subscriber-----------------
-
         object_state_topic = 'robot_' + str(index) + '/base_pose_ground_truth'
         self.object_state_sub = rospy.Subscriber(object_state_topic, Odometry, self.ground_truth_callback)
 
@@ -69,13 +62,10 @@ class StageWorld():
         crash_topic = 'robot_' + str(index) + '/is_crashed'
         self.check_crash = rospy.Subscriber(crash_topic, Int8, self.crash_callback)
 
-
         self.sim_clock = rospy.Subscriber('clock', Clock, self.sim_clock_callback)
 
         # -----------Service-------------------
         self.reset_stage = rospy.ServiceProxy('reset_positions', Empty)
-
-
 
         # # Wait until the first callback
         self.speed = None

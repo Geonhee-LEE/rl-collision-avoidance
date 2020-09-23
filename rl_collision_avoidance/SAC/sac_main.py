@@ -10,17 +10,21 @@ import argparse
 from mpi4py import MPI
 
 from torch.optim import Adam
+import datetime
+from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 
 from model.net import QNetwork, CNNPolicy
 from stage_world import StageWorld
-from model.sac import sac_update_stage
-from model.sac import generate_action
-from model.update_file import hard_update
+from model.sac import sac_update_stage, generate_action
+from model.sac import SAC
+from utils import soft_update, hard_update
 from model.replay_memory import ReplayMemory
 
 
 parser = argparse.ArgumentParser(description='PyTorch Soft Actor-Critic Args')
+parser.add_argument('--env-name', default="Stage",
+                    help='Environment name (default: Stage)')
 parser.add_argument('--policy', default="Gaussian",
                     help='Policy Type: Gaussian | Deterministic (default: Gaussian)')
 parser.add_argument('--eval', type=bool, default=True,
@@ -34,8 +38,8 @@ parser.add_argument('--lr', type=float, default=0.0003, metavar='G',
 parser.add_argument('--alpha', type=float, default=0.2, metavar='G',
                     help='Temperature parameter α determines the relative importance of the entropy\
                             term against the reward (default: 0.2)')
-#parser.add_argument('--automatic_entropy_tuning', type=bool, default=False, metavar='G',
-#                    help='Automaically adjust α (default: False)')
+parser.add_argument('--automatic_entropy_tuning', type=bool, default=False, metavar='G',
+                    help='Automaically adjust α (default: False)')
 parser.add_argument('--seed', type=int, default=123456, metavar='N',
                     help='random seed (default: 123456)')
 parser.add_argument('--batch_size', type=int, default=256, metavar='N',
@@ -62,127 +66,107 @@ parser.add_argument('--act_size', type=int, default=2,
                     help='Action size (default: 2, translation, rotation velocity)')
 parser.add_argument('--epoch', type=int, default=1,
                     help='Epoch (default: 1)')
+parser.add_argument('--hidden_size', type=int, default=256, metavar='N',
+                    help='hidden size (default: 256)')                    
 args = parser.parse_args()
 
 
-def run(comm, env, policy, critic, critic_opt, critic_target, policy_path, action_bound, optimizer):
+def run(comm, env, policy, agent, args):
 
-    buff = []
-    global_update = 0
-    global_step = 0
+    # Training Loop
+    total_numsteps = 0
+    updates = 0
 
     # world reset
     if env.index == 0: # step
         env.reset_world()
 
-    update = 0 # The number of learning using Replay memory
-
     # replay_memory     
     replay_memory = ReplayMemory(args.replay_size, args.seed)
 
-    for id in range(args.num_steps):
-        
-        # reset
-        env.reset_pose()
-        
-        terminal = False
-        ep_reward = 0
-        step = 1
+    #Tesnorboard
+    writer = SummaryWriter('runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
+                                                             args.policy, "autotune" if args.automatic_entropy_tuning else ""))
 
+    for i_episode in range(args.num_steps):
+        episode_reward = 0
+        episode_steps = 0
+        done = False        
+        # Env reset
+        env.reset_pose()
         # generate goal
         env.generate_goal_point()
         
-        # get_state
-        obs = env.get_laser_observation()
-        obs_stack = deque([obs, obs, obs])
+        # Get initial state
+        frame = env.get_laser_observation()
+        frame_stack = deque([frame, frame, frame])
         goal = np.asarray(env.get_local_goal())
         speed = np.asarray(env.get_self_speed())
-        state = [obs_stack, goal, speed]
+        state = [frame_stack, goal, speed]
 
-        # episode 1
-        while not terminal and not rospy.is_shutdown():
-                        
+        # Episode start
+        while not done and not rospy.is_shutdown():    
             state_list = comm.gather(state, root=0)
 
-            ## get_action
-            #-------------------------------------------------------------------------
-            # generate actions at rank==0
-            a, logprob, scaled_action=generate_action(env=env, state_list=state_list,
-                                                         policy=policy, action_bound=action_bound)
+            ## Select action
+            #----------------------------------------------
+            if args.start_steps > total_numsteps:
+                #action = env.action_space.sample()  # Sample random action
+                action = agent.select_action(state_list)  # Sample action from policy
+            else:
+                action = agent.select_action(state_list)  # Sample action from policy
 
-            # execute actions
+            if len(memory) > args.batch_size:
+                # Number of updates per step in environment
+                for i in range(args.updates_per_step):
+                    # Update parameters of all the networks
+                    critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = agent.update_parameters(memory, args.batch_size, updates)
+
+                    writer.add_scalar('loss/critic_1', critic_1_loss, updates)
+                    writer.add_scalar('loss/critic_2', critic_2_loss, updates)
+                    writer.add_scalar('loss/policy', policy_loss, updates)
+                    writer.add_scalar('loss/entropy_loss', ent_loss, updates)
+                    writer.add_scalar('entropy_temprature/alpha', alpha, updates)
+                    updates += 1
+                    
+            # Execute actions
             #-------------------------------------------------------------------------            
-            real_action = comm.scatter(scaled_action, root=0)
-            
-            ## run action
-            #-------------------------------------------------------------------------            
+            real_action = comm.scatter(action, root=0)    
             env.control_vel(real_action)
-
             rospy.sleep(0.001)
 
-            ## get reward
-            #-------------------------------------------------------------------------
-            # get informtion
-            r, terminal, result = env.get_reward_and_terminate(step)
-            ep_reward += r
-            global_step += 1
+            ## Get reward and terminal state
+            reward, done, result = env.get_reward_and_terminate(step)
+            episode_steps += 1
+            total_numsteps += 1
+            episode_reward += reward
 
-            #-------------------------------------------------------------------------
-
-            # get next state
-            #-------------------------------------------------------------------------
-            s_next = env.get_laser_observation()
-            left = obs_stack.popleft()
+            # Get next state
+            next_frame = env.get_laser_observation()
+            left = frame_stack.popleft()
             
-            obs_stack.append(s_next)
-            goal_next = np.asarray(env.get_local_goal())
-            speed_next = np.asarray(env.get_self_speed())
-            state_next = [obs_stack, goal_next, speed_next]
-
-            #-------------------------------------------------------------------------
+            frame_stack.append(next_frame)
+            next_goal = np.asarray(env.get_local_goal())
+            next_speed = np.asarray(env.get_self_speed())
+            next_state = [frame_stack, next_goal, next_speed]
 
             r_list = comm.gather(r, root=0)
-            terminal_list = comm.gather(terminal, root=0)
-            state_next_list = comm.gather(state_next, root=0)
+            done_list = comm.gather(done, root=0)
+            #next_state_list = comm.gather(next_state, root=0)
 
+            # Ignore the "done" signal if it comes from hitting the time horizon.
+            # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
+            mask = 1 if episode_steps == num_steps else float(not done)
 
-            ## training
-            #-------------------------------------------------------------------------
-            if env.index == 0: # Reset
+            memory.push(frame_stack, goal, speed, action, reward, next_frame, next_goal, next_speed, mask) # Append transition to memory
 
-                # add data in replay_memory
-                #-------------------------------------------------------------------------
-                replay_memory.push(state[0], state[1],state[2],a, logprob, r_list, state_next[0], state_next[1], state_next[2], terminal_list)
-                if len(replay_memory) > args.batch_size:
-            
-                    ## update
-                    #-------------------------------------------------------------------------
-                    update = sac_update_stage(policy=policy, optimizer=optimizer, critic=critic, critic_opt=critic_opt, critic_target=critic_target, 
-                                            batch_size=args.batch_size, memory=replay_memory, epoch=args.epoch, replay_size=args.replay_size,
-                                            tau=args.tau, alpha=args.alpha, gamma=args.gamma, updates=update, update_interval=args.target_update_interval,
-                                            num_step=args.batch_size, num_env=args.num_env, frames=args.laser_hist,
-                                            obs_size=args.laser_beam, act_size=args.act_size)
+            state = next_state  
 
-                    buff = []
-                    global_update += 1
-                    update = update
+        if total_numsteps > args.num_steps:
+            break
+        writer.add_scalar('reward/train', episode_reward, i_episode)episode_steps
+        print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}".format(i_episode, total_numsteps, episode_steps, round(episode_reward, 2)))
 
-            step += 1
-            state = state_next
-
-        ## save policy
-        #--------------------------------------------------------------------------------------------------------------
-        if env.index == 0: # Step is first
-            if global_update != 0 and global_update % 1000 == 0:
-                torch.save(policy.state_dict(), policy_path + '/policy_{}'.format(global_update))
-                torch.save(critic.state_dict(), policy_path + '/critic_{}'.format(global_update))
-                logger.info('########################## model saved when update {} times#########'
-                            '################'.format(global_update))
-        distance = np.sqrt((env.goal_point[0] - env.init_pose[0])**2 + (env.goal_point[1]-env.init_pose[1])**2)
-
-        logger.info('Env %02d, Goal (%05.1f, %05.1f), Episode %05d, setp %03d, Reward %-5.1f, Distance %05.1f, %s' % \
-                    (env.index, env.goal_point[0], env.goal_point[1], id + 1, step, ep_reward, distance, result))
-        logger_cal.info(ep_reward)
 
 
 if __name__ == '__main__':
@@ -217,51 +201,19 @@ if __name__ == '__main__':
     rank = comm.Get_rank() # The second of these is called Get_rank(), and this returns the rank of the calling process within the communicator. Note that Get_rank() will return a different value for every process in the MPI program.
     print("MPI size=%d, rank=%d" % (size, rank))
 
-    env = StageWorld(beam_num=args.laser_beam, index=rank, num_env=args.num_env)
+    # Environment
+    env = StageWorld(beam_num=args.laser_beam, index=rank, num_env=args.num_env, args=args)
     print("Ready to environment")
     
     reward = None
-    action_bound = [[0, -1], [1, 1]] #### Action maximum, minimum values
-    # torch.manual_seed(1)
-    # np.random.seed(1)
     if rank == 0:
-        policy_path = 'saved_policy'
-        # policy = MLPPolicy(obs_size, act_size)
-        policy = CNNPolicy(frames=args.laser_hist, action_space=args.act_size)
-        policy.cuda()
-        
-        opt = Adam(policy.parameters(), lr=args.lr)
-        mse = nn.MSELoss()
-
-        critic = QNetwork(frames=args.laser_hist, action_space=args.act_size)
-        critic.cuda()
-
-        critic_opt = Adam(critic.parameters(), lr=args.lr)
-        critic_target = QNetwork(frames=args.laser_hist, action_space=args.act_size)
-        critic_target.cuda()
-
-        hard_update(critic_target, critic)
-
-        if not os.path.exists(policy_path):
-            os.makedirs(policy_path)
-
-        file = policy_path + '/stage1_2.pth'
-        if os.path.exists(file):
-            logger.info('####################################')
-            logger.info('############Loading Model###########')
-            logger.info('####################################')
-            state_dict = torch.load(file)
-            policy.load_state_dict(state_dict)
-        else:
-            logger.info('#####################################')
-            logger.info('############Start Training###########')
-            logger.info('#####################################')
+        # Agent num_frame_obs, num_goal_obs, num_vel_obs, action_space, args
+        action_bound = [[0, -1], [1, 1]] #### Action maximum, minimum values
+        agent = SAC(num_frame_obs=args.laser_hist, num_goal_obs=2, num_vel_obs=2, action_space=action_bound, args)
     else:
-        policy = None
-        policy_path = None
-        opt = None
+        agent = None
 
     try:
-        run(comm=comm, env=env, policy=policy, critic=critic, critic_opt=critic_opt, critic_target=critic_target, policy_path=policy_path, action_bound=action_bound, optimizer=opt)
+        run(comm=comm, env=env, agent=agent)
     except KeyboardInterrupt:
         pass

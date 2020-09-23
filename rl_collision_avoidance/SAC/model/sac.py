@@ -5,8 +5,9 @@ from torch.autograd import Variable
 from torch.nn import functional as F
 import numpy as np
 import socket
-from update_file import soft_update
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
+from net import GaussianPolicy, QNetwork, DeterministicPolicy
+from utils import soft_update, hard_update
 
 hostname = socket.gethostname()
 if not os.path.exists('./log/' + hostname):
@@ -45,31 +46,6 @@ def generate_action(env, state_list, policy, action_bound):
         logprob = None
 
     return a, logprob, scaled_action
-
-def generate_action_no_sampling(env, state_list, policy, action_bound):
-    if env.index == 0:
-        s_list, goal_list, speed_list = [], [], []
-        for i in state_list:
-            s_list.append(i[0])
-            goal_list.append(i[1])
-            speed_list.append(i[2])
-
-        s_list = np.asarray(s_list)
-        goal_list = np.asarray(goal_list)
-        speed_list = np.asarray(speed_list)
-
-        s_list = Variable(torch.from_numpy(s_list)).float().cuda()
-        goal_list = Variable(torch.from_numpy(goal_list)).float().cuda()
-        speed_list = Variable(torch.from_numpy(speed_list)).float().cuda()
-
-        _, _, mean = policy(s_list, goal_list, speed_list)
-        mean = mean.data.cpu().numpy()
-        scaled_action = np.clip(mean, a_min=action_bound[0], a_max=action_bound[1])
-    else:
-        mean = None
-        scaled_action = None
-
-    return mean, scaled_action
 
 def sac_update_stage(policy, optimizer, critic, critic_opt, critic_target, batch_size, memory, epoch,
                replay_size, tau, alpha, gamma, updates, update_interval,
@@ -143,3 +119,139 @@ def sac_update_stage(policy, optimizer, critic, critic_opt, critic_target, batch
         updates = updates + 1
 
     return updates
+
+
+### SAC
+
+class SAC(object):
+    def __init__(self, num_frame_obs, num_goal_obs, num_vel_obs, action_space, args):
+
+        self.gamma = args.gamma
+        self.tau = args.tau
+        self.alpha = args.alpha
+
+        self.policy_type = args.policy
+        self.target_update_interval = args.target_update_interval
+        self.automatic_entropy_tuning = args.automatic_entropy_tuning
+
+        self.device = torch.device("cuda" if args.cuda else "cpu")
+
+        self.critic = QNetwork(num_frame_obs, num_goal_obs, num_vel_obs, action_space.shape[0], args.hidden_size).to(device=self.device)
+        self.critic_optim = Adam(self.critic.parameters(), lr=args.lr)
+
+        self.critic_target = QNetwork(num_frame_obs, num_goal_obs, num_vel_obs, action_space.shape[0], args.hidden_size).to(self.device)
+        hard_update(self.critic_target, self.critic)
+
+        if self.policy_type == "Gaussian":
+            # Target Entropy = −dim(A) (e.g. , -6 for HalfCheetah-v2) as given in the paper
+            if self.automatic_entropy_tuning is True:
+                self.target_entropy = -torch.prod(torch.Tensor(action_space.shape).to(self.device)).item()
+                self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+                self.alpha_optim = Adam([self.log_alpha], lr=args.lr)
+
+            self.policy = GaussianPolicy(num_frame_obs, num_goal_obs, num_vel_obs, action_space.shape[0], args.hidden_size, action_space).to(self.device)
+            self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
+
+        else:
+            self.alpha = 0
+            self.automatic_entropy_tuning = False
+            self.policy = DeterministicPolicy(num_frame_obs, num_goal_obs, num_vel_obs, action_space.shape[0], args.hidden_size, action_space).to(self.device)
+            self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
+
+    def select_action(self, state_list, evaluate=False):
+        frame_list, goal_list, vel_list = [], [], []
+        for i in state_list:
+            frame_list.append(i[0])
+            goal_list.append(i[1])
+            vel_list.append(i[2])
+        frame_list = Variable(torch.from_numpy(s_list)).float().cuda()
+        goal_list = Variable(torch.from_numpy(goal_list)).float().cuda()
+        vel_list = Variable(torch.from_numpy(speed_list)).float().cuda()
+
+        #state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
+        if evaluate is False:
+            action, _, _ = self.policy.sample(frame_list, goal_list, vel_list)
+        else:
+            _, _, action = self.policy.sample(frame_list, goal_list, vel_list)
+        #return action.detach().cpu().numpy()[0]
+        return action.cpu().numpy()
+
+    def update_parameters(self, memory, batch_size, updates):
+        # Sample a batch from memory
+        frame_batch, goal_batch, speed_batch, action_batch, reward_batch, next_frame_batch, next_goal_batch, next_speed_batch, mask_batch = memory.sample(batch_size=batch_size)
+
+        frame_batch = torch.FloatTensor(frame_batch).to(self.device)
+        goal_batch = torch.FloatTensor(goal_batch).to(self.device)
+        speed_batch = torch.FloatTensor(speed_batch).to(self.device)
+        next_frame_batch = torch.FloatTensor(next_frame_batch).to(self.device)
+        next_goal_batch = torch.FloatTensor(next_goal_batch).to(self.device)
+        next_speed_batch = torch.FloatTensor(next_speed_batch).to(self.device)
+        action_batch = torch.FloatTensor(action_batch).to(self.device)
+        reward_batch = torch.FloatTensor(reward_batch).to(self.device).unsqueeze(1)
+        mask_batch = torch.FloatTensor(mask_batch).to(self.device).unsqueeze(1)
+
+        with torch.no_grad():
+            next_state_action, next_state_log_pi, _ = self.policy.sample(next_frame_batch, next_goal_batch, next_speed_batch)
+            qf1_next_target, qf2_next_target = self.critic_target(next_frame_batch, next_goal_batch, next_speed_batch, next_state_action)
+            min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
+            next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target)
+        qf1, qf2 = self.critic(frame_batch, goal_batch, speed_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
+        qf1_loss = F.mse_loss(qf1, next_q_value)  # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
+        qf2_loss = F.mse_loss(qf2, next_q_value)  # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
+        qf_loss = qf1_loss + qf2_loss
+
+        self.critic_optim.zero_grad()
+        qf_loss.backward()
+        self.critic_optim.step()
+
+        pi, log_pi, _ = self.policy.sample(frame_batch, goal_batch, speed_batch)
+
+        qf1_pi, qf2_pi = self.critic(frame_batch, goal_batch, speed_batch, pi)
+        min_qf_pi = torch.min(qf1_pi, qf2_pi)
+
+        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() # Jπ = 𝔼st∼D,εt∼N[α * logπ(f(εt;st)|st) − Q(st,f(εt;st))]
+
+        self.policy_optim.zero_grad()
+        policy_loss.backward()
+        self.policy_optim.step()
+
+        if self.automatic_entropy_tuning:
+            alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
+
+            self.alpha_optim.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optim.step()
+
+            self.alpha = self.log_alpha.exp()
+            alpha_tlogs = self.alpha.clone() # For TensorboardX logs
+        else:
+            alpha_loss = torch.tensor(0.).to(self.device)
+            alpha_tlogs = torch.tensor(self.alpha) # For TensorboardX logs
+
+
+        if updates % self.target_update_interval == 0:
+            soft_update(self.critic_target, self.critic, self.tau)
+
+        return qf1_loss.item(), qf2_loss.item(), policy_loss.item(), alpha_loss.item(), alpha_tlogs.item()
+
+    # Save model parameters
+    def save_model(self, env_name, suffix="", actor_path=None, critic_path=None):
+        if not os.path.exists('models/'):
+            os.makedirs('models/')
+
+        if actor_path is None:
+            actor_path = "models/sac_actor_{}_{}".format(env_name, suffix)
+        if critic_path is None:
+            critic_path = "models/sac_critic_{}_{}".format(env_name, suffix)
+        print('Saving models to {} and {}'.format(actor_path, critic_path))
+        torch.save(self.policy.state_dict(), actor_path)
+        torch.save(self.critic.state_dict(), critic_path)
+
+    # Load model parameters
+    def load_model(self, actor_path, critic_path):
+        print('Loading models from {} and {}'.format(actor_path, critic_path))
+        if actor_path is not None:
+            self.policy.load_state_dict(torch.load(actor_path))
+        if critic_path is not None:
+            self.critic.load_state_dict(torch.load(critic_path))
+
