@@ -107,7 +107,6 @@ def sac_update_stage(policy, optimizer, critic, critic_opt, critic_target, batch
        
 
         with torch.no_grad():
-
             n_actions, n_logprobs, _ = policy(sampled_n_obs, sampled_n_goals, sampled_n_speeds)
             qf1_n_target, qf2_n_target = critic_target(sampled_n_obs, sampled_n_goals, sampled_n_speeds, n_actions)
             min_qf_n_target = torch.min(qf1_n_target, qf2_n_target) - alpha * n_logprobs
