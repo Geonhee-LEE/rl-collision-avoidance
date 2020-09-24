@@ -11,14 +11,12 @@ from mpi4py import MPI
 
 from torch.optim import Adam
 import datetime
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 
-from model.net import QNetwork, CNNPolicy
+from model.net import QNetwork, ValueNetwork, GaussianPolicy, DeterministicPolicy
 from stage_world import StageWorld
-from model.sac import sac_update_stage, generate_action
 from model.sac import SAC
-from utils import soft_update, hard_update
 from model.replay_memory import ReplayMemory
 
 
@@ -32,14 +30,14 @@ parser.add_argument('--eval', type=bool, default=True,
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor for reward (default: 0.99)')
 parser.add_argument('--tau', type=float, default=0.005, metavar='G',
-                    help='target smoothing coefficient(τ) (default: 0.005)')
+                    help='target smoothing coefficient(\tau) (default: 0.005)')
 parser.add_argument('--lr', type=float, default=0.0003, metavar='G',
                     help='learning rate (default: 0.0003)')
 parser.add_argument('--alpha', type=float, default=0.2, metavar='G',
-                    help='Temperature parameter α determines the relative importance of the entropy\
+                    help='Temperature parameter \alpha determines the relative importance of the entropy\
                             term against the reward (default: 0.2)')
 parser.add_argument('--automatic_entropy_tuning', type=bool, default=False, metavar='G',
-                    help='Automaically adjust α (default: False)')
+                    help='Automaically adjust \alpha (default: False)')
 parser.add_argument('--seed', type=int, default=123456, metavar='N',
                     help='random seed (default: 123456)')
 parser.add_argument('--batch_size', type=int, default=256, metavar='N',
@@ -71,7 +69,7 @@ parser.add_argument('--hidden_size', type=int, default=256, metavar='N',
 args = parser.parse_args()
 
 
-def run(comm, env, policy, agent, args):
+def run(comm, env, agent, args):
 
     # Training Loop
     total_numsteps = 0
@@ -85,8 +83,8 @@ def run(comm, env, policy, agent, args):
     replay_memory = ReplayMemory(args.replay_size, args.seed)
 
     #Tesnorboard
-    writer = SummaryWriter('runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
-                                                             args.policy, "autotune" if args.automatic_entropy_tuning else ""))
+    #writer = SummaryWriter('runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
+    #                                                         args.policy, "autotune" if args.automatic_entropy_tuning else ""))
 
     for i_episode in range(args.num_steps):
         episode_reward = 0
@@ -122,11 +120,11 @@ def run(comm, env, policy, agent, args):
                     # Update parameters of all the networks
                     critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = agent.update_parameters(memory, args.batch_size, updates)
 
-                    writer.add_scalar('loss/critic_1', critic_1_loss, updates)
-                    writer.add_scalar('loss/critic_2', critic_2_loss, updates)
-                    writer.add_scalar('loss/policy', policy_loss, updates)
-                    writer.add_scalar('loss/entropy_loss', ent_loss, updates)
-                    writer.add_scalar('entropy_temprature/alpha', alpha, updates)
+                    #writer.add_scalar('loss/critic_1', critic_1_loss, updates)
+                    #writer.add_scalar('loss/critic_2', critic_2_loss, updates)
+                    #writer.add_scalar('loss/policy', policy_loss, updates)
+                    #writer.add_scalar('loss/entropy_loss', ent_loss, updates)
+                    #writer.add_scalar('entropy_temprature/alpha', alpha, updates)
                     updates += 1
                     
             # Execute actions
@@ -164,7 +162,7 @@ def run(comm, env, policy, agent, args):
 
         if total_numsteps > args.num_steps:
             break
-        writer.add_scalar('reward/train', episode_reward, i_episode)episode_steps
+        #writer.add_scalar('reward/train', episode_reward, i_episode)
         print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}".format(i_episode, total_numsteps, episode_steps, round(episode_reward, 2)))
 
 
@@ -202,18 +200,18 @@ if __name__ == '__main__':
     print("MPI size=%d, rank=%d" % (size, rank))
 
     # Environment
-    env = StageWorld(beam_num=args.laser_beam, index=rank, num_env=args.num_env, args=args)
+    env = StageWorld(beam_num=args.laser_beam, index=rank, num_env=args.num_env)
     print("Ready to environment")
     
     reward = None
     if rank == 0:
         # Agent num_frame_obs, num_goal_obs, num_vel_obs, action_space, args
         action_bound = [[0, -1], [1, 1]] #### Action maximum, minimum values
-        agent = SAC(num_frame_obs=args.laser_hist, num_goal_obs=2, num_vel_obs=2, action_space=action_bound, args)
+        agent = SAC(num_frame_obs=args.laser_hist, num_goal_obs=2, num_vel_obs=2, action_space=action_bound, args=args)
     else:
         agent = None
 
     try:
-        run(comm=comm, env=env, agent=agent)
+        run(comm=comm, env=env, agent=agent, args=args)
     except KeyboardInterrupt:
         pass
