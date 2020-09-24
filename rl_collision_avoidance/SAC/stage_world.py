@@ -33,6 +33,7 @@ class StageWorld():
         self.goal_size = 0.5
 
         self.init_pose = None
+        self.is_dead = None
 
         # for get reward and terminate
         self.stop_counter = 0
@@ -52,9 +53,11 @@ class StageWorld():
         object_state_topic = 'robot_' + str(index) + '/base_pose_ground_truth'
         self.object_state_sub = rospy.Subscriber(object_state_topic, Odometry, self.ground_truth_callback)
 
-        laser_topic = 'robot_'+ str(index) + '/base_scan'
-
+        laser_topic = '/robot_'+ str(index) + '/base_scan_0'
         self.laser_sub = rospy.Subscriber(laser_topic, LaserScan, self.laser_scan_callback)
+
+        dead_topic = '/robot_'+ str(index) + '/base_scan_1'
+        self.dead_sub = rospy.Subscriber(dead_topic, LaserScan, self.laser_dead_callback)
 
         odom_topic = 'robot_' + str(index) + '/odom'
         self.odom_sub = rospy.Subscriber(odom_topic, Odometry, self.odometry_callback)
@@ -95,6 +98,14 @@ class StageWorld():
                            scan.scan_time, scan.range_min, scan.range_max]
         self.scan = np.array(scan.ranges)
         self.laser_cb_num += 1
+
+    def laser_dead_callback(self, dead_scan):
+        self.scan_dead = np.array(dead_scan.ranges)
+        self.scan_dead[np.isnan(self.scan_dead)] = 0.6
+        self.scan_dead[np.isinf(self.scan_dead)] = 0.6
+        dead_scan_min = np.min(self.scan_dead)
+        if dead_scan_min < 0.6:
+            self.is_dead = True
 
 
     def odometry_callback(self, odometry):
@@ -199,6 +210,11 @@ class StageWorld():
             reward_c = -15.
             result = 'Crashed'
 
+        if self.is_dead == 1:
+            terminate = True
+            reward_c = -15.
+            result = 'Crashed'
+
         if np.abs(w) >  1.05:
             reward_w = -0.1 * np.abs(w)
 
@@ -223,6 +239,8 @@ class StageWorld():
             self.control_pose(random_pose)
         #rospy.sleep(0.01)
         rospy.sleep(1.0)
+        self.is_dead = False
+
 
 
     def control_vel(self, action):
