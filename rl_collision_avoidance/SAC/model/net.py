@@ -46,11 +46,11 @@ class QNetwork(nn.Module):
 
     def forward(self, frame, goal, vel, action):
         o1 = F.relu(self.fea_cv1(frame))
-        o1 = F.relu(self.fea_cv2(s1))
+        o1 = F.relu(self.fea_cv2(o1))
         o1 = o1.view(o1.shape[0], -1)
         o1 = F.relu(self.fc1(o1))
 
-        xu = torch.cat([o1, goal, vel, action], 1) # observation + action
+        xu = torch.cat([o1, goal, vel, action], dim=1) # observation + action
         
         x1 = F.relu(self.linear1(xu))
         x1 = F.relu(self.linear2(x1))
@@ -78,7 +78,7 @@ class ValueNetwork(nn.Module):
 
     def forward(self, frame, goal, vel):
         o1 = F.relu(self.fea_cv1(frame))
-        o1 = F.relu(self.fea_cv2(s1))
+        o1 = F.relu(self.fea_cv2(o1))
         o1 = o1.view(o1.shape[0], -1)
         o1 = F.relu(self.fc1(o1))
 
@@ -116,11 +116,16 @@ class GaussianPolicy(nn.Module):
                 (action_space[:,1] - action_space[:,0]) / 2.)
 
     def forward(self, frame, goal, vel):
+        print("frame:", frame.shape)
+        print("goal:", goal.shape)
+        print("vel:", vel.shape)
+
         o1 = F.relu(self.fea_cv1(frame))
-        o1 = F.relu(self.fea_cv2(s1))
+        o1 = F.relu(self.fea_cv2(o1))
         o1 = o1.view(o1.shape[0], -1)
         o1 = F.relu(self.fc1(o1))
         state = torch.cat([o1, goal, vel], 1) # observation
+        print("state:", state.shape)
 
         x = F.relu(self.linear1(state))
         x = F.relu(self.linear2(x))
@@ -141,6 +146,9 @@ class GaussianPolicy(nn.Module):
         log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + epsilon)
         log_prob = log_prob.sum(1, keepdim=True)
         mean = torch.tanh(mean) * self.action_scale + self.action_bias
+        print ("action.shape:", action.shape)
+        print ("log_prob.shape:", log_prob.shape)
+        print ("mean.shape:", mean.shape)
         return action, log_prob, mean
 
     def to(self, device):
@@ -175,7 +183,7 @@ class DeterministicPolicy(nn.Module):
 
     def forward(self, frame, goal, vel):
         o1 = F.relu(self.fea_cv1(frame))
-        o1 = F.relu(self.fea_cv2(s1))
+        o1 = F.relu(self.fea_cv2(o1))
         o1 = o1.view(o1.shape[0], -1)
         o1 = F.relu(self.fc1(o1))
         state = torch.cat([o1, goal, vel], 1) # observation

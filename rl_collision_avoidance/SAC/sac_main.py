@@ -52,8 +52,8 @@ parser.add_argument('--target_update_interval', type=int, default=1, metavar='N'
                     help='Value target update per no. of updates per step (default: 1)')
 parser.add_argument('--replay_size', type=int, default=1000000, metavar='N',
                     help='size of replay buffer (default: 10000000)')
-parser.add_argument('--cuda', action="store_true",
-                    help='run on CUDA (default: False)')
+parser.add_argument('--cuda', type=bool, default=True,
+                    help='run on CUDA (default: True)') 
 parser.add_argument('--laser_beam', type=int, default=512,
                     help='the number of Lidar scan [observation] (default: 512)')
 parser.add_argument('--num_env', type=int, default=1,
@@ -114,7 +114,8 @@ def run(comm, env, agent, args):
             else:
                 action = agent.select_action(state_list)  # Sample action from policy
 
-            if len(memory) > args.batch_size:
+            print ("env.index: ", env.index, "select_action: ", action.shape)
+            if len(replay_memory) > args.batch_size:
                 # Number of updates per step in environment
                 for i in range(args.updates_per_step):
                     # Update parameters of all the networks
@@ -129,12 +130,14 @@ def run(comm, env, agent, args):
                     
             # Execute actions
             #-------------------------------------------------------------------------            
-            real_action = comm.scatter(action, root=0)    
+            real_action = comm.scatter(action, root=0)  
+            
+            print ("env.index: ", env.index, "select_action2: ", real_action.shape)  
             env.control_vel(real_action)
             rospy.sleep(0.001)
 
             ## Get reward and terminal state
-            reward, done, result = env.get_reward_and_terminate(step)
+            reward, done, result = env.get_reward_and_terminate(episode_steps)
             episode_steps += 1
             total_numsteps += 1
             episode_reward += reward
@@ -148,7 +151,7 @@ def run(comm, env, agent, args):
             next_speed = np.asarray(env.get_self_speed())
             next_state = [frame_stack, next_goal, next_speed]
 
-            r_list = comm.gather(r, root=0)
+            r_list = comm.gather(reward, root=0)
             done_list = comm.gather(done, root=0)
             #next_state_list = comm.gather(next_state, root=0)
 
@@ -206,8 +209,8 @@ if __name__ == '__main__':
     reward = None
     if rank == 0:
         # Agent num_frame_obs, num_goal_obs, num_vel_obs, action_space, args
-        action_bound = [[0, -1], [1, 1]] #### Action maximum, minimum values
-        agent = SAC(num_frame_obs=args.laser_hist, num_goal_obs=2, num_vel_obs=2, action_space=action_bound, args=args)
+        action_bound = np.array([[0, -1], [1, 1]]) #### Action maximum, minimum values
+        agent = SAC(env = env, num_frame_obs=args.laser_hist, num_goal_obs=2, num_vel_obs=2, action_space=action_bound, args=args)
     else:
         agent = None
 
