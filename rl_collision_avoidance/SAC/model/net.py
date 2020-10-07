@@ -38,7 +38,11 @@ class QNetwork(nn.Module):
         self.linear3 = nn.Linear(hidden_dim, 1)
 
         # Q2 architecture
-        self.linear4 = nn.Linear(256 + num_goal_obs + num_vel_obs + num_actions + num_actions, hidden_dim)
+        #self.linear4 = nn.Linear(256 + num_goal_obs + num_vel_obs + num_actions + num_actions, hidden_dim)
+        self.linear4 = nn.Linear(256 + num_goal_obs + num_vel_obs + num_actions, hidden_dim)
+        
+        #print(num_goal_obs)
+
         self.linear5 = nn.Linear(hidden_dim, hidden_dim)
         self.linear6 = nn.Linear(hidden_dim, 1)
 
@@ -49,8 +53,13 @@ class QNetwork(nn.Module):
         o1 = F.relu(self.fea_cv2(o1))
         o1 = o1.view(o1.shape[0], -1)
         o1 = F.relu(self.fc1(o1))
-
-        xu = torch.cat([o1, goal, vel, action], dim=1) # observation + action
+        '''
+        print(frame.shape)
+        print(goal.shape)
+        print(vel.shape)
+        print(action.shape)
+        '''
+        xu = torch.cat((o1, goal, vel, action), dim=-1) # observation + action
         
         x1 = F.relu(self.linear1(xu))
         x1 = F.relu(self.linear2(x1))
@@ -93,6 +102,8 @@ class GaussianPolicy(nn.Module):
     def __init__(self, num_frame_obs, num_goal_obs, num_vel_obs, num_actions, hidden_dim, action_space=None):
         super(GaussianPolicy, self).__init__()
 
+        self.logstd = nn.Parameter(torch.zeros(2))
+
         self.fea_cv1 = nn.Conv1d(in_channels=num_frame_obs, out_channels=32, kernel_size=5, stride=2, padding=1)
         self.fea_cv2 = nn.Conv1d(in_channels=32, out_channels=32, kernel_size=3, stride=2, padding=1)
         self.fc1 = nn.Linear(128*32, 256) # Lidar conv, fc output = 256. it will be next observation full connected layer including goal and velocity
@@ -101,6 +112,11 @@ class GaussianPolicy(nn.Module):
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
 
         self.mean_linear = nn.Linear(hidden_dim, num_actions) # Different from PPO
+
+        self.mean1_linear = nn.Linear(hidden_dim, 1) # Different from PPO
+        self.mean2_linear = nn.Linear(hidden_dim, 1) # Different from PPO
+
+
         self.log_std_linear = nn.Linear(hidden_dim, num_actions)
 
         self.apply(weights_init_)
@@ -111,26 +127,43 @@ class GaussianPolicy(nn.Module):
             self.action_bias = torch.tensor(0.)
         else:
             self.action_scale = torch.FloatTensor(
-                (action_space[:,1] - action_space[:,0]) / 2.)
+                (action_space.high - action_space.low) / 2.)
             self.action_bias = torch.FloatTensor(
-                (action_space[:,1] - action_space[:,0]) / 2.)
+                (action_space.high - action_space.low) / 2.)
+            
+            scale = [0.5, 1]
+
+            bias = [0.5, 0]
+
+            self.action_scale = torch.FloatTensor(scale)
+            self.action_bias = torch.FloatTensor(bias)
+
+            print("self.action_scale")
+            print(self.action_scale)
+            print("self.action_bias")
+            print(self.action_bias)
 
     def forward(self, frame, goal, vel):
-        print("frame:", frame.shape)
-        print("goal:", goal.shape)
-        print("vel:", vel.shape)
-
         o1 = F.relu(self.fea_cv1(frame))
         o1 = F.relu(self.fea_cv2(o1))
         o1 = o1.view(o1.shape[0], -1)
         o1 = F.relu(self.fc1(o1))
-        state = torch.cat([o1, goal, vel], 1) # observation
-        print("state:", state.shape)
+        state = torch.cat((o1, goal, vel), dim=-1) # observation
 
         x = F.relu(self.linear1(state))
         x = F.relu(self.linear2(x))
+
+        #mean1 = F.sigmoid(self.mean1_linear(x))
+        #mean2 = F.tanh(self.mean2_linear(x))
+        
+        #mean = torch.cat((mean1, mean2), dim=-1)
+
         mean = self.mean_linear(x)
+
+        #log_std = self.logstd.expand_as(mean)
+
         log_std = self.log_std_linear(x)
+        
         log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max=LOG_SIG_MAX)
         return mean, log_std
 
@@ -139,16 +172,17 @@ class GaussianPolicy(nn.Module):
         std = log_std.exp()
         normal = Normal(mean, std)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
+
         y_t = torch.tanh(x_t)
+
+
         action = y_t * self.action_scale + self.action_bias
         log_prob = normal.log_prob(x_t)
         # Enforcing Action Bound
         log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + epsilon)
+
         log_prob = log_prob.sum(1, keepdim=True)
-        mean = torch.tanh(mean) * self.action_scale + self.action_bias
-        print ("action.shape:", action.shape)
-        print ("log_prob.shape:", log_prob.shape)
-        print ("mean.shape:", mean.shape)
+        mean = torch.tanh(mean) * self.action_scale  + self.action_bias
         return action, log_prob, mean
 
     def to(self, device):
@@ -190,7 +224,7 @@ class DeterministicPolicy(nn.Module):
 
         x = F.relu(self.linear1(state))
         x = F.relu(self.linear2(x))
-        mean = torch.tanh(self.mean(x)) * self.action_scale + self.action_bias
+        mean = torch.tanh(self.mean(x)) * self.action_scale #+ self.action_bias
         return mean
 
     def sample(self, frame, goal, vel):
