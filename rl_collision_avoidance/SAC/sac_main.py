@@ -119,7 +119,7 @@ def run(comm, env, agent, args):
                 # Number of updates per step in environment
                 for i in range(args.updates_per_step):
                     # Update parameters of all the networks
-                    critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = agent.update_parameters(memory, args.batch_size, updates)
+                    critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = agent.update_parameters(replay_memory, args.batch_size, updates)
 
                     #writer.add_scalar('loss/critic_1', critic_1_loss, updates)
                     #writer.add_scalar('loss/critic_2', critic_2_loss, updates)
@@ -157,9 +157,9 @@ def run(comm, env, agent, args):
 
             # Ignore the "done" signal if it comes from hitting the time horizon.
             # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
-            mask = 1 if episode_steps == num_steps else float(not done)
+            mask = 1 if episode_steps == args.num_steps else float(not done)
 
-            memory.push(frame_stack, goal, speed, action, reward, next_frame, next_goal, next_speed, mask) # Append transition to memory
+            replay_memory.push(frame_stack, goal, speed, action, reward, next_frame, next_goal, next_speed, mask) # Append transition to memory
 
             state = next_state  
 

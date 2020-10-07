@@ -8,16 +8,16 @@ class ReplayMemory:
         self.buffer = []
         self.position = 0
 
-    def push(self, frame, goal, speed, action, logprob, reward, n_frame, n_goal, n_speed, done):
+    def push(self, frame, goal, speed, action, reward, n_frame, n_goal, n_speed, done):
         if len(self.buffer) < self.capacity:
             self.buffer.append(None)
-        self.buffer[self.position] = (frame,goal,speed, action, logprob, reward, n_frame, n_goal, n_speed, done)
+        self.buffer[self.position] = (frame,goal,speed, action, reward, n_frame, n_goal, n_speed, done)
         self.position = (self.position + 1) % self.capacity
 
     def sample(self, batch_size):
         batch = random.sample(self.buffer, batch_size)
-        frame, goal, speed, action, logprob, reward, n_frame, n_goal, n_speed, done = map(np.stack, zip(*batch))
-        return frame, goal, speed, action, logprob, reward, n_frame,n_goal, n_speed, done
+        frame, goal, speed, action, reward, n_frame, n_goal, n_speed, done = map(np.stack, zip(*batch))
+        return frame, goal, speed, action, reward, n_frame, n_goal, n_speed, done
 
     def __len__(self):
         return len(self.buffer)
