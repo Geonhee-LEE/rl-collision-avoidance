@@ -187,6 +187,14 @@ class StageWorld():
         self.pre_distance = np.sqrt(x ** 2 + y ** 2)
         self.distance = copy.deepcopy(self.pre_distance)
 
+    def generate_zero_goal_point(self):
+        [x_g, y_g] = [0, 0]
+        self.goal_point = [0, 0]
+        [x, y] = self.get_local_goal()
+
+        self.pre_distance = np.sqrt(x ** 2 + y ** 2)
+        self.distance = copy.deepcopy(self.pre_distance)
+
     def get_reward_and_terminate(self, t):
         terminate = False
         laser_scan = self.get_laser_observation()
@@ -202,27 +210,25 @@ class StageWorld():
 
         if self.distance < self.goal_size:
             terminate = True
-            reward_g = 15
+            reward_g = 5
             result = 'Reach Goal'
 
         if is_crash == 1:
             terminate = True
-            reward_c = -15.
+            reward_c = -1.
             result = 'Crashed'
 
         if self.is_dead == 1:
             terminate = True
-            reward_c = -15.
+            reward_c = -1.
             result = 'Crashed'
 
-        if np.abs(w) >  1.05:
-            reward_w = -0.1 * np.abs(w)
+        reward = reward_g + reward_c 
 
-        if t > 150:
+        if t > 1000 and (not is_crash or not is_dead) :
+            reward = -0.1 
             terminate = True
             result = 'Time out'
-
-        reward = reward_g + reward_c + reward_w
 
         return reward, terminate, result
 
