@@ -16,7 +16,7 @@ import datetime
 #from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 
-from model.net import QNetwork, ValueNetwork, GaussianPolicy, DeterministicPolicy
+from model.net import QNetwork, ValueNetwork, GaussianPolicy
 from stage_world import StageWorld
 from model.sac import SAC
 from model.replay_memory import ReplayMemory
@@ -88,6 +88,9 @@ def run(comm, env, agent, args):
     #writer = SummaryWriter('runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
     #                                                         args.policy, "autotune" if args.automatic_entropy_tuning else ""))
 
+    avg_reward = 0
+    avg_cnt = 0
+
     for i_episode in range(args.num_steps):
 
         episode_reward = 0
@@ -96,7 +99,8 @@ def run(comm, env, agent, args):
         # Env reset
         env.reset_pose()
         # generate goal
-        env.generate_goal_point()
+        # env.generate_goal_point()
+        env.generate_zero_goal_point() # For checking the training well 1007
         
         # Get initial state
         frame = env.get_laser_observation()
@@ -104,6 +108,7 @@ def run(comm, env, agent, args):
         goal = np.asarray(env.get_local_goal())
         speed = np.asarray(env.get_self_speed())
         state = [frame_stack, goal, speed]
+
 
         # Episode start
         while not done and not rospy.is_shutdown():    
@@ -174,7 +179,14 @@ def run(comm, env, agent, args):
         if total_numsteps > args.num_steps:
             break
         #writer.add_scalar('reward/train', episode_reward, i_episode)
-        print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}".format(i_episode, total_numsteps, episode_steps, round(episode_reward, 2)))
+
+        avg_cnt += 1
+
+        print("Episode: {}, episode steps: {}, reward: {}, result: {}".format(i_episode, episode_steps, round(reward, 2), result))
+
+        avg_reward += round(episode_reward, 2)
+        if avg_cnt % 100 == 0:
+            print("Average reward: {}".format(avg_reward/avg_cnt))
 
 
 
@@ -217,9 +229,8 @@ if __name__ == '__main__':
     reward = None
     if rank == 0:
         # Agent num_frame_obs, num_goal_obs, num_vel_obs, action_space, args
-        action_bound = [[0, 1], [-1, 1]] #### Action maximum, minimum values
-        action_bound = spaces.Box(-1, +1, (2,), dtype=np.float32)
-        print(action_bound.shape)
+        action_bound = spaces.Box(low=np.array([0.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
+        print("action_bound.shape: ", action_bound.shape, "action_bound", action_bound)
         agent = SAC(num_frame_obs=args.laser_hist, num_goal_obs=2, num_vel_obs=2, action_space=action_bound, args=args)
     else:
         agent = None
