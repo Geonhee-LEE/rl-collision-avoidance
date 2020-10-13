@@ -24,10 +24,9 @@ class Flatten(nn.Module):
     def forward(self, input):
         return input.view(input.shape[0], 1,  -1)
 
-class QNetwork(nn.Module):
+class QNetwork_1(nn.Module):
     def __init__(self, num_frame_obs, num_goal_obs, num_vel_obs, num_actions, hidden_dim):
-        super(QNetwork, self).__init__()
-
+        super(QNetwork_1, self).__init__()
         self.fea_cv1 = nn.Conv1d(in_channels=num_frame_obs, out_channels=32, kernel_size=5, stride=2, padding=1)
         self.fea_cv2 = nn.Conv1d(in_channels=32, out_channels=32, kernel_size=3, stride=2, padding=1)
         self.fc1 = nn.Linear(128*32, 256) # Lidar conv, fc output = 256. it will be next observation full connected layer including goal and velocity
@@ -36,15 +35,6 @@ class QNetwork(nn.Module):
         self.linear1 = nn.Linear(256 + num_goal_obs + num_vel_obs + num_actions, hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         self.linear3 = nn.Linear(hidden_dim, 1)
-
-        # Q2 architecture
-        #self.linear4 = nn.Linear(256 + num_goal_obs + num_vel_obs + num_actions + num_actions, hidden_dim)
-        self.linear4 = nn.Linear(256 + num_goal_obs + num_vel_obs + num_actions, hidden_dim)
-        
-        #print(num_goal_obs)
-
-        self.linear5 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear6 = nn.Linear(hidden_dim, 1)
 
         self.apply(weights_init_)
 
@@ -65,11 +55,37 @@ class QNetwork(nn.Module):
         x1 = F.relu(self.linear2(x1))
         x1 = self.linear3(x1)
 
+        return x1
+
+class QNetwork_2(nn.Module):
+    def __init__(self, num_frame_obs, num_goal_obs, num_vel_obs, num_actions, hidden_dim):
+        super(QNetwork_2, self).__init__()
+
+        self.fea_cv1 = nn.Conv1d(in_channels=num_frame_obs, out_channels=32, kernel_size=5, stride=2, padding=1)
+        self.fea_cv2 = nn.Conv1d(in_channels=32, out_channels=32, kernel_size=3, stride=2, padding=1)
+        self.fc1 = nn.Linear(128*32, 256) # Lidar conv, fc output = 256. it will be next observation full connected layer including goal and velocity
+
+        # Q2 architecture
+        #self.linear4 = nn.Linear(256 + num_goal_obs + num_vel_obs + num_actions + num_actions, hidden_dim)
+        self.linear4 = nn.Linear(256 + num_goal_obs + num_vel_obs + num_actions, hidden_dim)
+        self.linear5 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear6 = nn.Linear(hidden_dim, 1)
+
+        self.apply(weights_init_)
+
+    def forward(self, frame, goal, vel, action):
+        o1 = F.relu(self.fea_cv1(frame))
+        o1 = F.relu(self.fea_cv2(o1))
+        o1 = o1.view(o1.shape[0], -1)
+        o1 = F.relu(self.fc1(o1))
+
+        xu = torch.cat((o1, goal, vel, action), dim=-1) # observation + action
+
         x2 = F.relu(self.linear4(xu))
         x2 = F.relu(self.linear5(x2))
         x2 = self.linear6(x2)
 
-        return x1, x2
+        return x2
 
 class ValueNetwork(nn.Module):
     def __init__(self, num_frame_obs, num_goal_obs, num_vel_obs, hidden_dim):

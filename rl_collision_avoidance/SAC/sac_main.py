@@ -13,10 +13,10 @@ from gym import spaces
 
 from torch.optim import Adam
 import datetime
-#from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 from collections import deque
 
-from model.net import QNetwork, ValueNetwork, GaussianPolicy
+from model.net import QNetwork_1,  QNetwork_2, ValueNetwork, GaussianPolicy
 from stage_world import StageWorld
 from model.sac import SAC
 from model.replay_memory import ReplayMemory
@@ -38,11 +38,11 @@ parser.add_argument('--lr', type=float, default=0.0003, metavar='G',
 parser.add_argument('--alpha', type=float, default=0.2, metavar='G',
                     help='Temperature parameter \alpha determines the relative importance of the entropy\
                             term against the reward (default: 0.2)')
-parser.add_argument('--automatic_entropy_tuning', type=bool, default=False, metavar='G',
-                    help='Automaically adjust \alpha (default: False)')
+parser.add_argument('--automatic_entropy_tuning', type=bool, default=True, metavar='G',
+                    help='Automaically adjust \alpha (default: True)')
 parser.add_argument('--seed', type=int, default=123456, metavar='N',
                     help='random seed (default: 123456)')
-parser.add_argument('--batch_size', type=int, default=256, metavar='N',
+parser.add_argument('--batch_size', type=int, default=1024, metavar='N',
                     help='batch size (default: 256)')
 parser.add_argument('--num_steps', type=int, default=1000001, metavar='N',
                     help='maximum number of steps (default: 1000000)')
@@ -58,8 +58,8 @@ parser.add_argument('--cuda', action="store_true",
                     help='run on CUDA (default: False)')
 parser.add_argument('--laser_beam', type=int, default=512,
                     help='the number of Lidar scan [observation] (default: 512)')
-parser.add_argument('--num_env', type=int, default=1,
-                    help='the number of environment (default: 1)')
+parser.add_argument('--num_env', type=int, default=10,
+                    help='the number of environment (default: 10)')
 parser.add_argument('--laser_hist', type=int, default=3,
                     help='the number of laser history (default: 3)')
 parser.add_argument('--act_size', type=int, default=2,
@@ -71,28 +71,28 @@ parser.add_argument('--hidden_size', type=int, default=256, metavar='N',
 args = parser.parse_args()
 
 
-def run(comm, env, agent, args):
+def run(comm, env, agent, policy_path, args):
 
+    test_interval = 10
+    save_interval = 500
     # Training Loop
     total_numsteps = 0
     updates = 0
 
     # world reset
     if env.index == 0: # step
+        #Tesnorboard
+        writer = SummaryWriter('runs/' + policy_path)
         env.reset_world()
 
     # replay_memory     
     memory = ReplayMemory(args.replay_size, args.seed)
 
-    #Tesnorboard
-    #writer = SummaryWriter('runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
-    #                                                         args.policy, "autotune" if args.automatic_entropy_tuning else ""))
-
     avg_reward = 0
     avg_cnt = 0
 
     for i_episode in range(args.num_steps):
-
+    
         episode_reward = 0
         episode_steps = 0
         done = False        
@@ -114,14 +114,10 @@ def run(comm, env, agent, args):
         while not done and not rospy.is_shutdown():    
             state_list = comm.gather(state, root=0)
 
-            ## Select action
-            #----------------------------------------------
-            #if args.start_steps > total_numsteps:
-                #action = env.action_space.sample()  # Sample random action
-            #    action = agent.select_action(state_list)  # Sample action from policy
-            
-            #else:
-            action = agent.select_action(state_list)  # Sample action from policy
+            if env.index == 0:
+                action = agent.select_action(state_list)  # Sample action from policy
+            else:
+                action = None
 
             if env.index == 0:
                 if len(memory) > args.batch_size:
@@ -130,11 +126,11 @@ def run(comm, env, agent, args):
                         # Update parameters of all the networks
                         critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = agent.update_parameters(memory, args.batch_size, updates)
 
-                        #writer.add_scalar('loss/critic_1', critic_1_loss, updates)
-                        #writer.add_scalar('loss/critic_2', critic_2_loss, updates)
-                        #writer.add_scalar('loss/policy', policy_loss, updates)
-                        #writer.add_scalar('loss/entropy_loss', ent_loss, updates)
-                        #writer.add_scalar('entropy_temprature/alpha', alpha, updates)
+                        writer.add_scalar('loss/critic_1', critic_1_loss, updates)
+                        writer.add_scalar('loss/critic_2', critic_2_loss, updates)
+                        writer.add_scalar('loss/policy', policy_loss, updates)
+                        writer.add_scalar('loss/entropy_loss', ent_loss, updates)
+                        writer.add_scalar('entropy_temprature/alpha', alpha, updates)
                         updates += 1
                     
             # Execute actions
@@ -165,22 +161,38 @@ def run(comm, env, agent, args):
 
             r_list = comm.gather(reward, root=0)
             done_list = comm.gather(done, root=0)
-            #next_state_list = comm.gather(next_state, root=0)
+            next_state_list = comm.gather(next_state, root=0)
 
             # Ignore the "done" signal if it comes from hitting the time horizon.
             # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
             
             mask = 1 if episode_steps == args.num_steps else float(not done) #??? what is mean
-            
-            memory.push(state[0], state[1], state[2], action[0], reward, next_state[0], next_state[1], next_state[2], mask) # Append transition to memory
+            if env.index == 0:
+                #meomry.list_push(state_list, action, r_list, next_state_list, done_list)
+                for i in range(np.asarray(state_list).shape[0]):
+                    memory.push(state_list[i][0], state_list[i][1], state_list[i][2], action[i], r_list[i], next_state_list[i][0], next_state_list[i][1], next_state_list[i][2], done_list[i]) # Append transition to memory
 
             state = next_state  
 
         if total_numsteps > args.num_steps:
-            break
-        #writer.add_scalar('reward/train', episode_reward, i_episode)
-
+            break        
+            
         avg_cnt += 1
+
+        if env.index == 0:
+            writer.add_scalar('reward/train', episode_reward, i_episode)
+            if i_episode != 0 and i_episode % save_interval == 0:
+    
+                torch.save(agent.policy.state_dict(), policy_path + '/policy_epi_{}'.format(i_episode))
+                print('########################## policy model saved when update {} times#########'
+                            '################'.format(i_episode))
+                torch.save(agent.critic_1.state_dict(), policy_path + '/critic_1_epi_{}'.format(i_episode))
+                print('########################## critic model saved when update {} times#########'
+                            '################'.format(i_episode))
+                torch.save(agent.critic_2.state_dict(), policy_path + '/critic_2_epi_{}'.format(i_episode))
+                print('########################## critic model saved when update {} times#########'
+                            '################'.format(i_episode))
+
 
         print("Episode: {}, episode steps: {}, reward: {}, result: {}".format(i_episode, episode_steps, round(reward, 2), result))
 
@@ -228,14 +240,57 @@ if __name__ == '__main__':
     
     reward = None
     if rank == 0:
+        policy_path = 'a10_epi_0'
         # Agent num_frame_obs, num_goal_obs, num_vel_obs, action_space, args
         action_bound = spaces.Box(low=np.array([0.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
         print("action_bound.shape: ", action_bound.shape, "action_bound", action_bound)
         agent = SAC(num_frame_obs=args.laser_hist, num_goal_obs=2, num_vel_obs=2, action_space=action_bound, args=args)
+
+        if not os.path.exists(policy_path):
+            os.makedirs(policy_path)
+
+        file_policy = policy_path + '/policy_epi_1000.pth'
+        file_critic_1 = policy_path + '/critic_1_epi_1000.pth'
+        file_critic_2 = policy_path + '/critic_2_epi_1000.pth'
+
+        if os.path.exists(file_policy):
+            logger.info('###########################################')
+            logger.info('############Loading Policy Model###########')
+            logger.info('###########################################')
+            state_dict = torch.load(file_policy)
+            agent.policy.load_state_dict(state_dict)
+        else:
+            logger.info('###########################################')
+            logger.info('############Start policy Training###########')
+            logger.info('###########################################')
+
+        if os.path.exists(file_critic_1):
+            logger.info('###########################################')
+            logger.info('############Loading critic_1 Model###########')
+            logger.info('###########################################')
+            state_dict = torch.load(file_critic_1)
+            agent.critic_1.load_state_dict(state_dict)
+        else:
+            logger.info('###########################################')
+            logger.info('############Start critic_1 Training###########')
+            logger.info('###########################################')
+    
+        if os.path.exists(file_critic_2):
+            logger.info('###########################################')
+            logger.info('############Loading critic_2 Model###########')
+            logger.info('###########################################')
+            state_dict = torch.load(file_critic_2)
+            agent.critic_2.load_state_dict(state_dict)
+        else:
+            logger.info('###########################################')
+            logger.info('############Start critic_2 Training###########')
+            logger.info('###########################################')    
+
     else:
         agent = None
+        policy_path = None
 
     try:
-        run(comm=comm, env=env, agent=agent, args=args)
+        run(comm=comm, env=env, agent=agent, policy_path=policy_path, args=args)
     except KeyboardInterrupt:
         pass

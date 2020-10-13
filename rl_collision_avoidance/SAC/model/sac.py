@@ -6,7 +6,7 @@ from torch.nn import functional as F
 import numpy as np
 import socket
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-from net import GaussianPolicy, QNetwork
+from net import GaussianPolicy, QNetwork_1, QNetwork_2
 from utils import soft_update, hard_update
 from torch.optim import Adam
 
@@ -20,6 +20,7 @@ logger_ppo.setLevel(logging.INFO)
 ppo_file_handler = logging.FileHandler(ppo_file, mode='a')
 ppo_file_handler.setLevel(logging.INFO)
 logger_ppo.addHandler(ppo_file_handler)
+
 
 ### SAC
 
@@ -39,11 +40,18 @@ class SAC(object):
 
         self.action_space_array = np.array(action_space)
         self.action_space = action_space
-        self.critic = QNetwork(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size).to(device=self.device)
-        self.critic_optim = Adam(self.critic.parameters(), lr=args.lr)
+        self.critic_1 = QNetwork_1(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size).to(device=self.device)
+        self.critic_1_optim = Adam(self.critic_1.parameters(), lr=args.lr)
 
-        self.critic_target = QNetwork(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size).to(self.device)
-        hard_update(self.critic_target, self.critic)
+        self.critic_1_target = QNetwork_1(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size).to(self.device)
+        hard_update(self.critic_1_target, self.critic_1)
+
+        self.critic_2 = QNetwork_2(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size).to(device=self.device)
+        self.critic_2_optim = Adam(self.critic_2.parameters(), lr=args.lr)
+
+        self.critic_2_target = QNetwork_2(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size).to(self.device)
+        hard_update(self.critic_2_target, self.critic_2)
+
 
         if self.policy_type == "Gaussian":
             if self.automatic_entropy_tuning is True:
@@ -59,7 +67,7 @@ class SAC(object):
         else:
             self.alpha = 0
             self.automatic_entropy_tuning = False
-            #self.policy = DeterministicPolicy(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size, self.action_space).to(self.device)
+            self.policy = DeterministicPolicy(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size, self.action_space).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
 
     def select_action(self, state_list, evaluate=False):
@@ -100,6 +108,7 @@ class SAC(object):
         next_speed_batch = torch.FloatTensor(next_speed_batch).to(self.device)
         action_batch = torch.FloatTensor(action_batch).to(self.device)
         reward_batch = torch.FloatTensor(reward_batch).to(self.device).unsqueeze(1)
+        mask_batch = mask_batch.astype(np.float32)
         mask_batch = torch.FloatTensor(mask_batch).to(self.device).unsqueeze(1)
 
         '''
@@ -111,32 +120,39 @@ class SAC(object):
 
         with torch.no_grad():
             next_state_action, next_state_log_pi, _ = self.policy.sample(next_frame_batch, next_goal_batch, next_speed_batch)
-            qf1_next_target, qf2_next_target = self.critic_target(next_frame_batch, next_goal_batch, next_speed_batch, next_state_action)
-            min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
-            next_q_value = reward_batch + (mask_batch) * self.gamma * (min_qf_next_target)
+            qf1_next_target = self.critic_1_target(next_frame_batch, next_goal_batch, next_speed_batch, next_state_action)
+            qf2_next_target = self.critic_2_target(next_frame_batch, next_goal_batch, next_speed_batch, next_state_action)
 
-        qf1, qf2 = self.critic(frame_batch, goal_batch, speed_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
+            min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
+            next_q_value = reward_batch + (1 - mask_batch) * self.gamma * (min_qf_next_target)
+
+        qf1 = self.critic_1(frame_batch, goal_batch, speed_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
+        qf2 = self.critic_2(frame_batch, goal_batch, speed_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
+
         qf1_loss = F.mse_loss(qf1, next_q_value)  
         qf2_loss = F.mse_loss(qf2, next_q_value)  
-        qf_loss = qf1_loss + qf2_loss
 
-        self.critic_optim.zero_grad()
-        qf_loss.backward()
-        self.critic_optim.step()
+        self.critic_1_optim.zero_grad()
+        qf1_loss.backward()
+        self.critic_1_optim.step()
+
+        self.critic_2_optim.zero_grad()
+        qf2_loss.backward()
+        self.critic_2_optim.step()
 
         pi, log_pi, _ = self.policy.sample(frame_batch, goal_batch, speed_batch)
 
-        qf1_pi, qf2_pi = self.critic(frame_batch, goal_batch, speed_batch, pi)
+        qf1_pi = self.critic_1(frame_batch, goal_batch, speed_batch, pi)
+        qf2_pi = self.critic_2(frame_batch, goal_batch, speed_batch, pi)
+    
         min_qf_pi = torch.min(qf1_pi, qf2_pi)
 
         policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() 
-
 
         self.policy_optim.zero_grad()
         policy_loss.backward()
         self.policy_optim.step()
         
-
         if self.automatic_entropy_tuning:
             alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
 
@@ -152,29 +168,11 @@ class SAC(object):
 
 
         if updates % self.target_update_interval == 0:
-            soft_update(self.critic_target, self.critic, self.tau)
 
+            soft_update(self.critic_1_target, self.critic_1, self.tau)
+            soft_update(self.critic_2_target, self.critic_2, self.tau)
 
         return qf1_loss.item(), qf2_loss.item(), policy_loss.item(), alpha_loss.item(), alpha_tlogs.item()
 
-    # Save model parameters
-    def save_model(self, env_name, suffix="", actor_path=None, critic_path=None):
-        if not os.path.exists('models/'):
-            os.makedirs('models/')
 
-        if actor_path is None:
-            actor_path = "models/sac_actor_{}_{}".format(env_name, suffix)
-        if critic_path is None:
-            critic_path = "models/sac_critic_{}_{}".format(env_name, suffix)
-        print('Saving models to {} and {}'.format(actor_path, critic_path))
-        torch.save(self.policy.state_dict(), actor_path)
-        torch.save(self.critic.state_dict(), critic_path)
-
-    # Load model parameters
-    def load_model(self, actor_path, critic_path):
-        print('Loading models from {} and {}'.format(actor_path, critic_path))
-        if actor_path is not None:
-            self.policy.load_state_dict(torch.load(actor_path))
-        if critic_path is not None:
-            self.critic.load_state_dict(torch.load(critic_path))
 
