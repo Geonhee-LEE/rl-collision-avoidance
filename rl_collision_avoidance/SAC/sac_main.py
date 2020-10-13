@@ -54,8 +54,8 @@ parser.add_argument('--target_update_interval', type=int, default=1, metavar='N'
                     help='Value target update per no. of updates per step (default: 1)')
 parser.add_argument('--replay_size', type=int, default=1000000, metavar='N',
                     help='size of replay buffer (default: 10000000)')
-parser.add_argument('--cuda', action="store_true",
-                    help='run on CUDA (default: False)')
+parser.add_argument('--cuda', type=bool, default=True,
+                    help='run on CUDA (default: True)')
 parser.add_argument('--laser_beam', type=int, default=512,
                     help='the number of Lidar scan [observation] (default: 512)')
 parser.add_argument('--num_env', type=int, default=10,
@@ -67,7 +67,9 @@ parser.add_argument('--act_size', type=int, default=2,
 parser.add_argument('--epoch', type=int, default=1,
                     help='Epoch (default: 1)')
 parser.add_argument('--hidden_size', type=int, default=256, metavar='N',
-                    help='hidden size (default: 256)')                    
+                    help='hidden size (default: 256)')     
+parser.add_argument('--policy_path',  default="single_agent2", 
+                    help='policy_path (default: single_agent)')                    
 args = parser.parse_args()
 
 
@@ -166,7 +168,6 @@ def run(comm, env, agent, policy_path, args):
             # Ignore the "done" signal if it comes from hitting the time horizon.
             # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
             
-            mask = 1 if episode_steps == args.num_steps else float(not done) #??? what is mean
             if env.index == 0:
                 #meomry.list_push(state_list, action, r_list, next_state_list, done_list)
                 for i in range(np.asarray(state_list).shape[0]):
@@ -237,10 +238,11 @@ if __name__ == '__main__':
     # Environment
     env = StageWorld(beam_num=args.laser_beam, index=rank, num_env=args.num_env)
     print("Ready to environment")
-    
+    policy_path = args.policy_path
+
+
     reward = None
     if rank == 0:
-        policy_path = 'a10_epi_0'
         # Agent num_frame_obs, num_goal_obs, num_vel_obs, action_space, args
         action_bound = spaces.Box(low=np.array([0.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
         print("action_bound.shape: ", action_bound.shape, "action_bound", action_bound)

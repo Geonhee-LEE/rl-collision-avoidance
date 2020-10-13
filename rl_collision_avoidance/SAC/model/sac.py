@@ -36,7 +36,6 @@ class SAC(object):
         self.automatic_entropy_tuning = args.automatic_entropy_tuning
 
         self.device = torch.device("cuda" if args.cuda else "cpu")
-        self.device = torch.device("cuda")
 
         self.action_space_array = np.array(action_space)
         self.action_space = action_space
@@ -67,7 +66,7 @@ class SAC(object):
         else:
             self.alpha = 0
             self.automatic_entropy_tuning = False
-            self.policy = DeterministicPolicy(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size, self.action_space).to(self.device)
+            #self.policy = DeterministicPolicy(num_frame_obs, num_goal_obs, num_vel_obs, self.action_space.shape[0], args.hidden_size, self.action_space).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
 
     def select_action(self, state_list, evaluate=False):
