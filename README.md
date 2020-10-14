@@ -4,23 +4,53 @@ This is a Pytorch implementation of the paper [Towards Optimally Decentralized M
 
 ## How to customize
 
-### Training the serving bot with Wandering agents
+### Training a serving bot with Wandering agents
 
 - Run the Stage ros
-```
-rosrun stage_ros_reinforcement_learning stageros_wander -u -n 6 $HOME/rl_ws/src/rl-collision-avoidance/worlds/servingbot_env/servingbot_agent.world
-```
+	```
+	rosrun stage_ros_reinforcement_learning stageros_wander -u -n 6 $HOME/rl_ws/src/rl-collision-avoidance/worlds/servingbot_env/servingbot_agent.world
+	```
 
-- or Launch 
-```
-roslaunch stage_ros_reinforcement_learning training.launch 
-```
+	- or Launch 
+	```
+	roslaunch stage_ros_reinforcement_learning multi_training_wander.launch 
+	```
 
 
 - Train the policy
-```
-mpiexec -np 1 python ppo_stage1.py
-```
+	```
+	mpiexec -np 1 python ppo_stage1.py
+	```
+	or 
+	```
+	python ppo_stage1.py
+	```
+
+### Training a agent
+
+- Run the Stage ros
+	```
+	roslaunch stage_ros_reinforcement_learning single_agent_training.launch 
+	```
+
+
+- Train the policy
+	```
+	python ppo_stage1.py
+	```
+
+### Training with multi-stage
+
+- Run the Stage ros
+	```
+	roslaunch stage_ros_reinforcement_learning multi_stage_training.launch 
+	```
+
+
+- Train the policy
+	```
+	mpiexec -np 4 python sac_main.py
+	```
 
 
 <details>
