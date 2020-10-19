@@ -128,8 +128,8 @@ class StageWorld():
 
     def get_laser_observation(self):
         scan = copy.deepcopy(self.scan)
-        scan[np.isnan(scan)] = 6.0
-        scan[np.isinf(scan)] = 6.0
+        scan[np.isnan(scan)] = 10.0
+        scan[np.isinf(scan)] = 10.0
         raw_beam_num = len(scan)
         sparse_beam_num = self.beam_mum
         step = float(raw_beam_num) / sparse_beam_num
@@ -148,7 +148,7 @@ class StageWorld():
             index -= step
 
         scan_sparse = np.concatenate((sparse_scan_left, sparse_scan_right[::-1]), axis=0)
-        return scan_sparse / 6.0 - 0.5
+        return scan_sparse / 10.0 - 0.5
 
 
     def get_self_speed(self):

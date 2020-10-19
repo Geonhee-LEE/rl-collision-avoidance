@@ -261,10 +261,9 @@ class StageWorld():
         self.pre_distance = copy.deepcopy(self.distance)
         self.distance = np.sqrt((self.goal_point[0] - x) ** 2 + (self.goal_point[1] - y) ** 2)
 
-        reward_g = (self.pre_distance - self.distance) * 2.5
+        reward_g = (self.pre_distance - self.distance) * 10
         reward_c = 0
         reward_w = 0
-        reward_t = 0
         reward_ct = 0
         result = 0
 
@@ -272,12 +271,12 @@ class StageWorld():
 
         if self.distance < self.goal_size:
             terminate = True
-            reward_g = 25
+            reward_g = 10
             result = 'Reach Goal'
         
         if is_crash == 1:
             terminate = True
-            reward_c = -25.
+            reward_c = -1.
             result = 'Crashed'  
         '''
         if self.is_collision == 1:
@@ -287,11 +286,12 @@ class StageWorld():
         '''
         if self.is_dead == 1:
             terminate = True
-            reward_c = -25.
+            reward_c = -1.
             result = 'Crashed'
-
+        '''
         if np.abs(w) >  1.05:
             reward_w = -0.1 * np.abs(w)
+        '''
         '''
         if (self.scan_min > self.robot_radius[0]) and (self.scan_min < (self.lidar_danger+self.robot_radius[0])):
             reward_ct = -0.25*((self.lidar_danger+self.robot_radius[0]) - self.scan_min)
@@ -299,10 +299,12 @@ class StageWorld():
         if t > 400:
             terminate = True
             result = 'Time out'
-        else:
-            reward_t = -0.05
 
-        reward = reward_g + reward_c + reward_w + reward_ct + reward_t
+        if reward_g > 10:
+            reward_g = 10
+
+        reward = reward_g + reward_c + reward_w + reward_ct
+
 
         return reward, terminate, result
 

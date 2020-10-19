@@ -7,6 +7,7 @@ import rospy
 import torch
 import torch.nn as nn
 import argparse
+import random
 from mpi4py import MPI
 
 from gym import spaces
@@ -33,16 +34,16 @@ parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor for reward (default: 0.99)')
 parser.add_argument('--tau', type=float, default=0.005, metavar='G',
                     help='target smoothing coefficient(\tau) (default: 0.005)')
-parser.add_argument('--lr', type=float, default=0.0003, metavar='G',
+parser.add_argument('--lr', type=float, default=0.0001, metavar='G',
                     help='learning rate (default: 0.0003)')
-parser.add_argument('--alpha', type=float, default=0.2, metavar='G',
+parser.add_argument('--alpha', type=float, default=0.1, metavar='G',
                     help='Temperature parameter \alpha determines the relative importance of the entropy\
                             term against the reward (default: 0.2)')
 parser.add_argument('--automatic_entropy_tuning', type=bool, default=True, metavar='G',
                     help='Automaically adjust \alpha (default: True)')
 parser.add_argument('--seed', type=int, default=123456, metavar='N',
                     help='random seed (default: 123456)')
-parser.add_argument('--batch_size', type=int, default=1024, metavar='N',
+parser.add_argument('--batch_size', type=int, default=256, metavar='N',
                     help='batch size (default: 256)')
 parser.add_argument('--num_steps', type=int, default=1000001, metavar='N',
                     help='maximum number of steps (default: 1000000)')
@@ -52,7 +53,7 @@ parser.add_argument('--start_steps', type=int, default=10000, metavar='N',
                     help='Steps sampling random actions (default: 10000)')
 parser.add_argument('--target_update_interval', type=int, default=1, metavar='N',
                     help='Value target update per no. of updates per step (default: 1)')
-parser.add_argument('--replay_size', type=int, default=1000000, metavar='N',
+parser.add_argument('--replay_size', type=int, default=300000, metavar='N',
                     help='size of replay buffer (default: 10000000)')
 parser.add_argument('--cuda', type=bool, default=True,
                     help='run on CUDA (default: True)')
@@ -68,15 +69,14 @@ parser.add_argument('--epoch', type=int, default=1,
                     help='Epoch (default: 1)')
 parser.add_argument('--hidden_size', type=int, default=256, metavar='N',
                     help='hidden size (default: 256)')     
-parser.add_argument('--policy_path',  default="weights", 
-                    help='policy_path (default: weights)')                    
+parser.add_argument('--policy_path',  default="multi_stage_v5", 
+                    help='policy_path (default: multi_stage)')                    
 args = parser.parse_args()
 
 
 def run(comm, env, agent, policy_path, args):
 
-    test_interval = 10
-    save_interval = 500
+    save_interval = 300
     # Training Loop
     total_numsteps = 0
     updates = 0
@@ -100,7 +100,7 @@ def run(comm, env, agent, policy_path, args):
         done = False        
 
         # ENV, MAP change
-        if avg_cnt != 0 and avg_cnt % 5 == 0 and env.index == 0:
+        if avg_cnt != 0 and avg_cnt % 20 == 0:
             env.map_change()      
 
         # Env reset
@@ -121,7 +121,9 @@ def run(comm, env, agent, policy_path, args):
 
 
         # Episode start
+        step = 0
         while not done and not rospy.is_shutdown():    
+            step += 1
             state_list = comm.gather(state, root=0)
 
             if env.index == 0:
@@ -134,13 +136,14 @@ def run(comm, env, agent, policy_path, args):
                     # Number of updates per step in environment
                     for i in range(args.updates_per_step):
                         # Update parameters of all the networks
-                        critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = agent.update_parameters(memory, args.batch_size, updates)
+                        if step % 10 == 0 and step > 10:
+                            critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = agent.update_parameters(memory, args.batch_size, updates)
 
-                        writer.add_scalar('loss/critic_1', critic_1_loss, updates)
-                        writer.add_scalar('loss/critic_2', critic_2_loss, updates)
-                        writer.add_scalar('loss/policy', policy_loss, updates)
-                        writer.add_scalar('loss/entropy_loss', ent_loss, updates)
-                        writer.add_scalar('entropy_temprature/alpha', alpha, updates)
+                            writer.add_scalar('loss/critic_1', critic_1_loss, updates)
+                            writer.add_scalar('loss/critic_2', critic_2_loss, updates)
+                            writer.add_scalar('loss/policy', policy_loss, updates)
+                            writer.add_scalar('loss/entropy_loss', ent_loss, updates)
+                            writer.add_scalar('entropy_temprature/alpha', alpha, updates)
                         updates += 1
               
             # Execute actions
@@ -179,7 +182,8 @@ def run(comm, env, agent, policy_path, args):
             if env.index == 0:
                 #meomry.list_push(state_list, action, r_list, next_state_list, done_list)
                 for i in range(np.asarray(state_list).shape[0]):
-                    memory.push(state_list[i][0], state_list[i][1], state_list[i][2], action[i], r_list[i], next_state_list[i][0], next_state_list[i][1], next_state_list[i][2], done_list[i]) # Append transition to memory
+                        if step > 10:
+                            memory.push(state_list[i][0], state_list[i][1], state_list[i][2], action[i], r_list[i], next_state_list[i][0], next_state_list[i][1], next_state_list[i][2], done_list[i]) # Append transition to memory
             
             state = next_state  
 
@@ -259,9 +263,9 @@ if __name__ == '__main__':
         if not os.path.exists(policy_path):
             os.makedirs(policy_path)
 
-        file_policy = policy_path + '/policy_epi_1000.pth'
-        file_critic_1 = policy_path + '/critic_1_epi_1000.pth'
-        file_critic_2 = policy_path + '/critic_2_epi_1000.pth'
+        file_policy = policy_path + '/policy_epi_3000'
+        file_critic_1 = policy_path + '/critic_1_epi_1000'
+        file_critic_2 = policy_path + '/critic_2_epi_1000'
 
         if os.path.exists(file_policy):
             logger.info('###########################################')
