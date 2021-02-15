@@ -509,16 +509,16 @@ StageNode::WorldCallback()
                 srand(((unsigned int)(this->sim_time.sec + this->sim_time.nsec) % 32767) + i*5);
 
                 Stg::Pose pose_w;
-                float x_rpose = rand() % 14 - 7;
-                float y_rpose = rand() % 14 - 7;
+                float x_rpose = rand() % 24 - 12;
+                float y_rpose = rand() % 24 - 12;
                 float yaw_rpose = ((rand() % 360)*M_PI/180); 
                 float dist = sqrt(pow(x_rpose,2) + pow(y_rpose,2));
 
-                while(dist > 9)
+                while(dist > 14)
                 {
                     srand((unsigned int)time(0) + (int)dist);
-                    x_rpose = rand() % 14 - 7;
-                    x_rpose = rand() % 14 - 7;
+                    x_rpose = rand() % 24 - 12;
+                    x_rpose = rand() % 24 - 12;
                     yaw_rpose = ((rand() % 360)*M_PI/180);
                     dist = sqrt(pow(x_rpose,2) + pow(y_rpose,2));
                     

@@ -56,6 +56,55 @@ if(catkin_EXPORTED_TARGETS)
   add_dependencies(stageros_w ${catkin_EXPORTED_TARGETS})
 endif()
 
+# Declare a cpp executable
+add_executable(stageros_w_6 src/stageros_w_6.cpp)
+set(${PROJECT_NAME}_extra_libs "")
+if(UNIX AND NOT APPLE)
+  set(${PROJECT_NAME}_extra_libs dl)
+endif()
+target_link_libraries(stageros_w_6
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+  ${STAGE_LIBRARIES}
+  ${${PROJECT_NAME}_extra_libs}
+)
+if(catkin_EXPORTED_TARGETS)
+  add_dependencies(stageros_w_6 ${catkin_EXPORTED_TARGETS})
+endif()
+
+
+# Declare a cpp executable
+add_executable(stageros_w_fix src/stageros_w_fix.cpp)
+set(${PROJECT_NAME}_extra_libs "")
+if(UNIX AND NOT APPLE)
+  set(${PROJECT_NAME}_extra_libs dl)
+endif()
+target_link_libraries(stageros_w_fix
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+  ${STAGE_LIBRARIES}
+  ${${PROJECT_NAME}_extra_libs}
+)
+if(catkin_EXPORTED_TARGETS)
+  add_dependencies(stageros_w_fix ${catkin_EXPORTED_TARGETS})
+endif()
+
+# Declare a cpp executable
+add_executable(stageros_syscon_w src/stageros_syscon_w.cpp)
+set(${PROJECT_NAME}_extra_libs "")
+if(UNIX AND NOT APPLE)
+  set(${PROJECT_NAME}_extra_libs dl)
+endif()
+target_link_libraries(stageros_syscon_w
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+  ${STAGE_LIBRARIES}
+  ${${PROJECT_NAME}_extra_libs}
+)
+if(catkin_EXPORTED_TARGETS)
+  add_dependencies(stageros_syscon_w ${catkin_EXPORTED_TARGETS})
+endif()
+
 ## Install
 
 install(PROGRAMS scripts/upgrade-world.sh
@@ -68,6 +117,24 @@ install(TARGETS stageros
 )
 
 install(TARGETS stageros_w
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(TARGETS stageros_w_6
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(TARGETS stageros_w_fix
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(TARGETS stageros_syscon_w
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

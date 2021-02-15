@@ -4,13 +4,12 @@ import copy
 import tf
 import numpy as np
 
-from geometry_msgs.msg import Twist, Pose
+from geometry_msgs.msg import Twist, Pose, Point32
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from rosgraph_msgs.msg import Clock
 from std_srvs.srv import Empty
 from std_msgs.msg import Int8
-from model.utils import get_init_pose, get_goal_point
 
 
 class StageWorld():
@@ -35,19 +34,31 @@ class StageWorld():
 
         self.robot_value = 10.
         self.goal_value = 0.
+        # self.reset_pose = None
 
+        self.init_pose = None
+
+
+        # for get reward and terminate
+        self.stop_counter = 0
 
         # -----------Publisher and Subscriber-------------
         cmd_vel_topic = 'robot_' + str(index) + '/cmd_vel'
         self.cmd_vel = rospy.Publisher(cmd_vel_topic, Twist, queue_size=10)
 
         cmd_pose_topic = 'robot_' + str(index) + '/cmd_pose'
-        self.cmd_pose = rospy.Publisher(cmd_pose_topic, Pose, queue_size=10)
+        self.cmd_pose = rospy.Publisher(cmd_pose_topic, Pose, queue_size=2)
+        
+        goal_point_topic = 'robot_' + str(index) + '/pub_goal_point'
+        self.pub_goal_point = rospy.Publisher(goal_point_topic, Pose, queue_size=2)
+
+
+        # ---------Subscriber-----------------
 
         object_state_topic = 'robot_' + str(index) + '/base_pose_ground_truth'
         self.object_state_sub = rospy.Subscriber(object_state_topic, Odometry, self.ground_truth_callback)
 
-        laser_topic = 'robot_' + str(index) + '/base_scan'
+        laser_topic = 'robot_'+ str(index) + '/base_scan'
 
         self.laser_sub = rospy.Subscriber(laser_topic, LaserScan, self.laser_scan_callback)
 
@@ -63,16 +74,17 @@ class StageWorld():
         # -----------Service-------------------
         self.reset_stage = rospy.ServiceProxy('reset_positions', Empty)
 
+
+
         # # Wait until the first callback
         self.speed = None
         self.state = None
         self.speed_GT = None
         self.state_GT = None
-        self.is_crashed = None
-        while self.scan is None or self.speed is None or self.state is None\
-                or self.speed_GT is None or self.state_GT is None or self.is_crashed is None:
-            pass
 
+        while self.scan is None or self.speed is None or self.state is None or self.speed_GT is None or self.state_GT is None:
+            pass
+       
         rospy.sleep(1.)
         # # What function to call when you ctrl + c
         # rospy.on_shutdown(self.shutdown)
@@ -114,23 +126,27 @@ class StageWorld():
 
     def get_laser_observation(self):
         scan = copy.deepcopy(self.scan)
-        scan[np.isnan(scan)] = 6.0
-        scan[np.isinf(scan)] = 6.0
+        scan[np.isnan(scan)] = 10.0
+        scan[np.isinf(scan)] = 10.0
         raw_beam_num = len(scan)
         sparse_beam_num = self.beam_mum
         step = float(raw_beam_num) / sparse_beam_num
         sparse_scan_left = []
         index = 0.
+
         for x in xrange(int(sparse_beam_num / 2)):
             sparse_scan_left.append(scan[int(index)])
             index += step
+
         sparse_scan_right = []
         index = raw_beam_num - 1.
+
         for x in xrange(int(sparse_beam_num / 2)):
             sparse_scan_right.append(scan[int(index)])
             index -= step
+
         scan_sparse = np.concatenate((sparse_scan_left, sparse_scan_right[::-1]), axis=0)
-        return scan_sparse / 6.0 - 0.5
+        return scan_sparse / 10.0 - 0.5
 
 
     def get_self_speed(self):
@@ -160,12 +176,9 @@ class StageWorld():
         self.start_time = time.time()
         rospy.sleep(0.5)
 
-
     def generate_goal_point(self):
-        if self.index > 33 and self.index < 44:
-            self.goal_point = self.generate_random_goal()
-        else:
-            self.goal_point = get_goal_point(self.index)
+        [x_g, y_g] = self.generate_random_goal()
+        self.goal_point = [x_g, y_g]
         [x, y] = self.get_local_goal()
 
         self.pre_distance = np.sqrt(x ** 2 + y ** 2)
@@ -174,7 +187,6 @@ class StageWorld():
     def get_reward_and_terminate(self, t):
         terminate = False
         laser_scan = self.get_laser_observation()
-        laser_min = np.amin(laser_scan)
         [x, y, theta] = self.get_self_stateGT()
         [v, w] = self.get_self_speedGT()
         self.pre_distance = copy.deepcopy(self.distance)
@@ -183,7 +195,6 @@ class StageWorld():
         reward_c = 0
         reward_w = 0
         result = 0
-
         is_crash = self.get_crash_state()
 
         if self.distance < self.goal_size:
@@ -199,28 +210,25 @@ class StageWorld():
         if np.abs(w) >  1.05:
             reward_w = -0.1 * np.abs(w)
 
-        if t > 200:
+        if t > 150:
             terminate = True
             result = 'Time out'
+
         reward = reward_g + reward_c + reward_w
 
         return reward, terminate, result
 
     def reset_pose(self):
-        if self.index > 33 and self.index < 44:
-            reset_pose = self.generate_random_pose()
-        else:
-            reset_pose = get_init_pose(self.index)
-
-        rospy.sleep(0.05)
-
-        self.control_pose(reset_pose)
-
+        random_pose = self.generate_random_pose()
+        rospy.sleep(0.01)
+        self.control_pose(random_pose)
         [x_robot, y_robot, theta] = self.get_self_stateGT()
 
-        while np.abs(reset_pose[0] - x_robot) > 0.2 or np.abs(reset_pose[1] - y_robot) > 0.2:
+        # start_time = time.time()
+        while np.abs(random_pose[0] - x_robot) > 0.2 or np.abs(random_pose[1] - y_robot) > 0.2:
             [x_robot, y_robot, theta] = self.get_self_stateGT()
-        rospy.sleep(0.05)
+            self.control_pose(random_pose)
+        rospy.sleep(0.01)
 
 
     def control_vel(self, action):
@@ -248,51 +256,41 @@ class StageWorld():
         pose_cmd.orientation.w = qtn[3]
         self.cmd_pose.publish(pose_cmd)
 
-
     def generate_random_pose(self):
-        [x_robot, y_robot, theta] = self.get_self_stateGT()
-
-        x = np.random.uniform(9, 19)
-        y = np.random.uniform(0, 1)
-
-        if y <= 0.4:
-            y = -(y * 10 + 1)
-        else:
-            y = -(y * 10 + 9)
-
-        dis_goal = np.sqrt((x - x_robot) ** 2 + (y - y_robot) ** 2)
-
-        while (dis_goal < 7) and not rospy.is_shutdown():
-            x = np.random.uniform(9, 19)
-            y = np.random.uniform(0, 1)
-            if y <= 0.4:
-                y = -(y * 10 + 1)
-            else:
-                y = -(y * 10 + 9)
-            dis_goal = np.sqrt((x - x_robot) ** 2 + (y - y_robot) ** 2)
-        theta = np.random.uniform(0, 2*np.pi)
-
+        x = np.random.uniform(-9, 9)
+        y = np.random.uniform(-9, 9)
+        dis = np.sqrt(x ** 2 + y ** 2)
+        while (dis > 9) and not rospy.is_shutdown():
+            x = np.random.uniform(-9, 9)
+            y = np.random.uniform(-9, 9)
+            dis = np.sqrt(x ** 2 + y ** 2)
+        theta = np.random.uniform(0, 2 * np.pi)
         return [x, y, theta]
 
     def generate_random_goal(self):
+        self.init_pose = self.get_self_stateGT()
+        x = np.random.uniform(-9, 9)
+        y = np.random.uniform(-9, 9)
+        dis_origin = np.sqrt(x ** 2 + y ** 2)
+        dis_goal = np.sqrt((x - self.init_pose[0]) ** 2 + (y - self.init_pose[1]) ** 2)
+        while (dis_origin > 9 or dis_goal > 10 or dis_goal < 8) and not rospy.is_shutdown():
+            x = np.random.uniform(-9, 9)
+            y = np.random.uniform(-9, 9)
+            dis_origin = np.sqrt(x ** 2 + y ** 2)
+            dis_goal = np.sqrt((x - self.init_pose[0]) ** 2 + (y - self.init_pose[1]) ** 2)
+            
+        g_point = Pose()
 
-        [x_robot, y_robot, theta] = self.get_self_stateGT()
-        x = np.random.uniform(9, 19)
-        y = np.random.uniform(0, 1)
-        if y <= 0.4:
-            y = -(y*10 + 1)
-        else:
-            y = -(y*10 + 9)
-        dis_goal = np.sqrt((x - x_robot) ** 2 + (y - y_robot) ** 2)
+        g_point.position.x = x
+        g_point.position.y = y
+        g_point.position.z = 0
 
-        while (dis_goal < 7) and not rospy.is_shutdown():
-            x = np.random.uniform(9, 19)
-            y = np.random.uniform(0, 1)
-            if y <= 0.4:
-                y = -(y * 10 + 1)
-            else:
-                y = -(y * 10 + 9)
-            dis_goal = np.sqrt((x - x_robot) ** 2 + (y - y_robot) ** 2)
+        g_point.orientation.x = 0
+        g_point.orientation.y = 0
+        g_point.orientation.z = 0
+        g_point.orientation.w = 0
+
+        self.pub_goal_point.publish(g_point)
 
         return [x, y]
 
@@ -300,3 +298,4 @@ class StageWorld():
 
 
 
+ 

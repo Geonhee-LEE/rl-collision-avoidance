@@ -498,45 +498,49 @@ StageNode::WorldCallback()
             
             srand(((unsigned int)(this->sim_time.sec + this->sim_time.nsec) % 32767)+ i*5);
     
-            float v_rspeed = (rand() % 50 + 50) * 0.01;
-            float w_rspeed = (rand() % 20 - 10) * 0.01;
+            float v_rspeed = 0.6;
+            float w_rspeed = 0;
             
             this->positionmodels[i]->SetSpeed(v_rspeed, 0.0, w_rspeed);
             
             if(this->positionmodels[i]->Stalled())
             {
+		if(i % 2)
+		{                
+			srand(((unsigned int)(this->sim_time.sec + this->sim_time.nsec) % 32767) + i*5);
 
-                srand(((unsigned int)(this->sim_time.sec + this->sim_time.nsec) % 32767) + i*5);
+		        Stg::Pose pose_w;
+		        float x_rpose = -7 + i*2;
+		        float y_rpose = -5;
+		        float yaw_rpose = ((90)*M_PI/180); 
+		        
+		        pose_w.x = x_rpose;
+		        pose_w.y = y_rpose;
+		        pose_w.z = 0;
+		        pose_w.a = yaw_rpose;
 
-                Stg::Pose pose_w;
-                float x_rpose = rand() % 14 - 7;
-                float y_rpose = rand() % 14 - 7;
-                float yaw_rpose = ((rand() % 360)*M_PI/180); 
-                float dist = sqrt(pow(x_rpose,2) + pow(y_rpose,2));
+		        this->positionmodels[i]->SetPose(pose_w);
+		}
+		else
+		{                
+			srand(((unsigned int)(this->sim_time.sec + this->sim_time.nsec) % 32767) + i*5);
 
-                while(dist > 9)
-                {
-                    srand((unsigned int)time(0) + (int)dist);
-                    x_rpose = rand() % 14 - 7;
-                    x_rpose = rand() % 14 - 7;
-                    yaw_rpose = ((rand() % 360)*M_PI/180);
-                    dist = sqrt(pow(x_rpose,2) + pow(y_rpose,2));
-                    
-                }
+		        Stg::Pose pose_w;
+		        float x_rpose = -7 + i*2;
+		        float y_rpose = 5;
+		        float yaw_rpose = ((-90)*M_PI/180); 
+		        
+		        pose_w.x = x_rpose;
+		        pose_w.y = y_rpose;
+		        pose_w.z = 0;
+		        pose_w.a = yaw_rpose;
 
-                pose_w.x = x_rpose;
-                pose_w.y = y_rpose;
-                pose_w.z = 0;
-                pose_w.a = yaw_rpose;
-                #include <unistd.h>
-                this->positionmodels[i]->SetPose(pose_w);
+		        this->positionmodels[i]->SetPose(pose_w);
+		}
+
 
             }
 
-            else
-            {
-                //count_collision = 0;
-            }
         }
     }
     
